@@ -272,7 +272,7 @@ export default function Dashboard() {
             </motion.div>
 
             {/* ── Recent Activity ── */}
-            {recentTransactions.filter((tx) => tx.isOnChain).length > 0 && (
+            {recentTransactions.length > 0 && (
                 <motion.div
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -283,7 +283,7 @@ export default function Dashboard() {
                         <h2 className="text-[16px] font-semibold text-black">Recent Activity</h2>
                     </div>
                     <div className="px-8 pb-8 pt-6 space-y-2">
-                        {recentTransactions.filter((tx) => tx.isOnChain).map((tx) => (
+                        {recentTransactions.map((tx) => (
                             <div key={tx.id} className="flex items-center justify-between rounded-xl bg-black/[0.015] px-5 py-3.5">
                                 <div className="flex items-center gap-3">
                                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/[0.04] text-black/40">
@@ -312,7 +312,7 @@ export default function Dashboard() {
                                             {tx.status}
                                         </span>
                                     </div>
-                                    {tx.txHash && (
+                                    {tx.isOnChain && tx.txHash && (
                                         <a
                                             href={`${currentNetwork.explorerUrl}/transactions/${tx.txHash}`}
                                             target="_blank"
