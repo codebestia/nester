@@ -14,46 +14,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-    title: {
-        default: "Nester | DApp",
-        template: "%s | Nester",
-    },
+    title: "Nester | DApp",
     description:
         "Decentralized savings and instant fiat settlements powered by Stellar.",
-    metadataBase: new URL(
-        process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com"
-    ),
-    openGraph: {
-        type: "website",
-        siteName: "Nester",
-        title: "Nester | DApp",
-        description:
-            "Decentralized savings and instant fiat settlements powered by Stellar.",
-        url: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
-        images: [
-            {
-                url: "/og-image.png",
-                width: 1200,
-                height: 630,
-                alt: "Nester — Decentralized Savings & Instant Fiat Settlements",
-            },
-        ],
-    },
-    twitter: {
-        card: "summary_large_image",
-        title: "Nester | DApp",
-        description:
-            "Decentralized savings and instant fiat settlements powered by Stellar.",
-        images: ["/og-image.png"],
-        creator: "@TheNesterHQ",
-    },
     icons: {
         icon: "/logo.png",
         apple: "/logo.png",
-    },
-    themeColor: "#0f172a",
-    alternates: {
-        canonical: process.env.NEXT_PUBLIC_APP_URL ?? "https://app.nesterhq.com",
     },
 };
 
@@ -62,10 +28,6 @@ import { OnboardingProvider } from "@/hooks/useOnboarding";
 import { NetworkProvider } from "@/context/NetworkProvider";
 import { NetworkBanner } from "@/components/network/NetworkSelector";
 import { PrometheusChatbot } from "@/components/ai/prometheusChatbot";
-import { ReactQueryProvider } from "@/components/react-query-provider";
-import { AuthProvider } from "@/components/auth-provider";
-import { BottomNav } from "@/components/bottom-nav";
-import { MotionConfig } from "framer-motion";
 
 export default function RootLayout({
     children,
@@ -76,38 +38,26 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body
                 suppressHydrationWarning
-                className={`${inter.className} ${inter.variable} antialiased md:pb-0 mobile-content-pad`}
+                className={`${inter.className} ${inter.variable} antialiased`}
             >
-                <MotionConfig reducedMotion="user">
-                    <ReactQueryProvider>
-                        <NetworkProvider>
-                            <SettingsProvider>
-                                <WalletProvider>
-                                    <AuthProvider>
-                                        <NotificationsProvider>
-                                            <NetworkBanner />
-                                            <PortfolioProvider>
-                                                <WebSocketProvider>
-                                                    <OnboardingProvider>
-                                                        <a href="#main-content" className="skip-link">
-                                                            Skip to main content
-                                                        </a>
-                                                        <main id="main-content">
-                                                            {children}
-                                                        </main>
-                                                        <BottomNav />
-                                                        <NotificationsToaster />
-                                                        <PrometheusChatbot />
-                                                    </OnboardingProvider>
-                                                </WebSocketProvider>
-                                            </PortfolioProvider>
-                                        </NotificationsProvider>
-                                    </AuthProvider>
-                                </WalletProvider>
-                            </SettingsProvider>
-                        </NetworkProvider>
-                    </ReactQueryProvider>
-                </MotionConfig>
+                <NetworkProvider>
+                    <SettingsProvider>
+                        <WalletProvider>
+                            <NotificationsProvider>
+                                <NetworkBanner />
+                                <PortfolioProvider>
+                                    <WebSocketProvider>
+                                        <OnboardingProvider>
+                                            {children}
+                                            <NotificationsToaster />
+                                            <PrometheusChatbot />
+                                        </OnboardingProvider>
+                                    </WebSocketProvider>
+                                </PortfolioProvider>
+                            </NotificationsProvider>
+                        </WalletProvider>
+                    </SettingsProvider>
+                </NetworkProvider>
             </body>
         </html>
     );

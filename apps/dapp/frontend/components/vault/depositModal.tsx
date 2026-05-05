@@ -16,7 +16,7 @@ import {
 import { usePortfolio } from "@/components/portfolio-provider";
 import { useWallet } from "@/components/wallet-provider";
 import { cn } from "@/lib/utils";
-import { type Vault as VaultDefinition } from "@/hooks/useVaults";
+import { type Vault as VaultDefinition, type MarketStrategy } from "@/lib/mock-vaults";
 import {
   executeVaultDeposit,
   UserRejectedError,
@@ -144,13 +144,14 @@ interface DepositModalProps {
 }
 
 function getVaultMeta(vault: VaultDefinition) {
+  const lockMatch = vault.maturityTerms.match(/(\d+)/);
   return {
-    apy: (vault.apy || 0) / 100,
-    apyLabel: vault.apy !== undefined ? `${vault.apy.toFixed(1)}%` : "TBD",
-    lockDays: 0,
-    managementFeePct: vault.managementFeePct ?? 0.5,
-    performanceFeePct: vault.performanceFeePct ?? 10,
-    asset: vault.asset,
+    apy: vault.currentApy / 100,
+    apyLabel: vault.apyRange,
+    lockDays: lockMatch ? Number(lockMatch[1]) : 0,
+    managementFeePct: 0.5,
+    performanceFeePct: 10,
+    asset: (vault.supportedAssets[0] ?? "USDC") as "USDC",
   };
 }
 
@@ -178,30 +179,38 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
   const [state, setState] = useState<ActionState>("input");
   const [errorMsg, setErrorMsg] = useState("");
   const [receipt, setReceipt] = useState<TransactionReceipt | null>(null);
-  const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">(vault?.asset ?? "USDC");
+  const [selectedAsset, setSelectedAsset] = useState<"USDC" | "XLM">(
+    (vault?.supportedAssets?.[0] as "USDC" | "XLM") ?? "USDC"
+  );
+  const [selectedStrategy, setSelectedStrategy] = useState<MarketStrategy | null>(
+    vault?.strategies?.[0] ?? null
+  );
 
-  // Keep selectedAsset in sync when vault changes
-  const supportedAssets = [vault?.asset ?? "USDC"] as ("USDC" | "XLM")[];
+  // Keep selectedAsset and strategy in sync when vault changes
+  const supportedAssets = (vault?.supportedAssets ?? ["USDC"]) as ("USDC" | "XLM")[];
+  const strategies = vault?.strategies ?? [];
+
+  // Reset strategy when vault changes
+  if (vault && selectedStrategy && !strategies.find(s => s.id === selectedStrategy.id)) {
+    setSelectedStrategy(strategies[0] ?? null);
+  }
 
   const amount = Number(amountInput) || 0;
   const meta = vault ? getVaultMeta(vault) : null;
   const balance = getAvailableBalance(selectedAsset);
 
   const validationError = useMemo(() => {
-    if (!vault) return null;
-    if (!vault.contractAddress || vault.contractAddress.length !== 56 || !vault.contractAddress.startsWith('C')) return "Vault is not yet live. Deposits are currently disabled.";
     if (!amount) return null;
     if (amount <= 0) return "Amount must be greater than 0.";
-    if (vault.minDeposit && amount < vault.minDeposit) return `Minimum deposit is ${vault.minDeposit}.`;
     if (amount > balance)
       return `Insufficient balance. You have ${formatCurrency(balance)} ${selectedAsset} available.`;
     return null;
-  }, [amount, balance, vault, selectedAsset]);
+  }, [amount, balance]);
 
   const canSubmit =
     !!vault && !!address && amount > 0 && !validationError && state === "input";
 
-  const effectiveApy = meta ? meta.apy : 0;
+  const effectiveApy = selectedStrategy ? selectedStrategy.apy / 100 : (meta ? meta.apy : 0);
   const estimatedYield = amount * effectiveApy;
 
   const reset = () => {
@@ -219,13 +228,10 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
 
     try {
       setState("building");
-      // Re-check wallet address at signing time — wallet may have disconnected
-      if (!address) throw new Error("Wallet disconnected. Please reconnect and try again.");
-
       const txReceipt = await executeVaultDeposit({
         walletAddress: address,
         vaultId: vault.id,
-        contractId: vault.contractAddress,
+        contractId: vault.contractAddress || "",
         asset: selectedAsset,
         amount,
       });
@@ -238,7 +244,7 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
           asset: selectedAsset,
           apy: meta?.apy || 0,
           lockDays: meta?.lockDays || 0,
-          earlyWithdrawalPenaltyPct: 0,
+          earlyWithdrawalPenaltyPct: 0.1,
         },
         amount,
         txHash: txReceipt.txHash,
@@ -275,9 +281,6 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                   <p className="mt-2 font-heading text-3xl font-light text-emerald-600">
                     {meta?.apyLabel}
                   </p>
-                  {meta?.apy !== undefined && meta?.apy !== 0 && (
-                      <p className="text-[9px] text-black/40 mt-1 max-w-[200px]">APY is variable and based on recent performance. Past performance is not indicative of future results.</p>
-                  )}
                 </div>
                 <div className="rounded-2xl bg-secondary px-3 py-2 text-right">
                   <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -288,6 +291,46 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                   </p>
                 </div>
               </div>
+
+              {/* Strategy selector */}
+              {strategies.length > 0 && (
+                <div className="mt-5">
+                  <label className="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                    Strategy
+                  </label>
+                  <div className="space-y-1.5">
+                    {strategies.map((strat) => (
+                      <button
+                        key={strat.id}
+                        type="button"
+                        onClick={() => setSelectedStrategy(strat)}
+                        className={cn(
+                          "w-full rounded-xl border px-4 py-3 text-left transition-all",
+                          selectedStrategy?.id === strat.id
+                            ? "border-foreground/20 bg-secondary/50 shadow-sm"
+                            : "border-border hover:border-border/80 hover:bg-secondary/20"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-foreground">{strat.name}</span>
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                              strat.risk === "low" ? "bg-emerald-50 text-emerald-600" :
+                              strat.risk === "medium" ? "bg-amber-50 text-amber-600" :
+                              "bg-red-50 text-red-500"
+                            )}>
+                              {strat.risk}
+                            </span>
+                            <span className="font-mono text-sm text-foreground">{strat.apy}%</span>
+                          </div>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{strat.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Amount input */}
               <div className="mt-5">
@@ -364,14 +407,10 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
               {/* Preview */}
               <div className="mt-5 space-y-3 rounded-2xl border border-border bg-secondary/30 p-4">
                 {[
-                  {
-                    label: "Strategy",
-                    value: vault.strategy,
-                  },
-                  {
-                    label: "Strategy APY",
-                    value: meta?.apyLabel || "TBD",
-                  },
+                  ...(selectedStrategy ? [
+                    { label: "Strategy", value: selectedStrategy.name },
+                    { label: "Strategy APY", value: `${selectedStrategy.apy}%` },
+                  ] : []),
                   {
                     label: "Estimated annual yield",
                     value: `${formatCurrency(estimatedYield)} ${selectedAsset}`,
@@ -382,8 +421,13 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
                   },
                   {
                     label: "Lock period",
-                    value: meta?.lockDays ? `${meta.lockDays} days` : "Flexible",
+                    value: selectedStrategy?.lockDays
+                      ? `${selectedStrategy.lockDays} days`
+                      : vault.maturityTerms,
                   },
+                  ...(selectedStrategy?.penaltyPct ? [
+                    { label: "Early exit penalty", value: `${selectedStrategy.penaltyPct}%` },
+                  ] : []),
                 ].map(({ label, value }) => (
                   <div
                     key={label}

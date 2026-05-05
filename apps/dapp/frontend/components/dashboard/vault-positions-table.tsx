@@ -50,14 +50,13 @@ export function VaultPositionsTable({ positions }: VaultPositionsTableProps) {
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse min-w-[600px]">
-                        <caption className="sr-only">Your Vault Positions</caption>
                         <thead>
                             <tr className="border-b border-border bg-secondary/5">
-                                <th scope="col" className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Vault</th>
-                                <th scope="col" className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Balance</th>
-                                <th scope="col" className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider text-right">APY</th>
-                                <th scope="col" className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Risk</th>
-                                <th scope="col" className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider text-right">Actions</th>
+                                <th className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Vault</th>
+                                <th className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Balance</th>
+                                <th className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider text-right">APY</th>
+                                <th className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Risk</th>
+                                <th className="px-6 py-3.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -94,18 +93,10 @@ export function VaultPositionsTable({ positions }: VaultPositionsTableProps) {
                                     </td>
                                     <td className="px-6 py-5 text-right">
                                         <div className="flex items-center justify-end gap-2">
-                                            <button 
-                                                className="h-8 w-8 rounded-lg border border-border bg-white flex items-center justify-center hover:bg-secondary transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" 
-                                                title="Deposit More"
-                                                aria-label={`Deposit more into ${pos.vaultName}`}
-                                            >
+                                            <button className="h-8 w-8 rounded-lg border border-border bg-white flex items-center justify-center hover:bg-secondary transition-all" title="Deposit More">
                                                 <Plus className="h-3.5 w-3.5" />
                                             </button>
-                                            <button 
-                                                className="h-8 w-8 rounded-lg border border-border bg-white flex items-center justify-center hover:bg-secondary transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" 
-                                                title="Withdraw"
-                                                aria-label={`Withdraw from ${pos.vaultName}`}
-                                            >
+                                            <button className="h-8 w-8 rounded-lg border border-border bg-white flex items-center justify-center hover:bg-secondary transition-all" title="Withdraw">
                                                 <Minus className="h-3.5 w-3.5" />
                                             </button>
                                         </div>

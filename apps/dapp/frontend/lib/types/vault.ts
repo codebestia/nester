@@ -38,6 +38,7 @@ export interface Vault {
   earlyWithdrawalPenalty: string;
   apyHistory: ApyDataPoint[];
   strategies: MarketStrategy[];
+  contractAddress?: string;
 }
 
 // Keep RiskTier as alias for backward compat during transition

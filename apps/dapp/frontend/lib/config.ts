@@ -6,7 +6,7 @@ export const config = {
     stellarHorizonUrl: process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org",
     vaultContractAddress: process.env.NEXT_PUBLIC_VAULT_CONTRACT_ADDRESS || "",
     vaultTokenContractAddress: process.env.NEXT_PUBLIC_VAULT_TOKEN_CONTRACT_ADDRESS || "",
-    explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL || "https://testnet.stellarchain.io",
+    explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL || "https://stellar.expert/explorer/testnet",
     defaultNgnRate: Number(process.env.NEXT_PUBLIC_DEFAULT_NGN_RATE) || 1530,
     friendbotUrl: process.env.NEXT_PUBLIC_FRIENDBOT_URL || "https://friendbot.stellar.org",
     featuredWallets: (process.env.NEXT_PUBLIC_FEATURED_WALLETS || "freighter,lobstr,xbull").split(","),

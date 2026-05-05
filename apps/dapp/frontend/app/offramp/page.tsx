@@ -5,7 +5,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { useNotifications } from "@/components/notifications-provider";
 import { AppShell } from "@/components/app-shell";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -29,7 +29,6 @@ import {
 
 import { BANKS, type LPNode, LP_NODES } from "@/lib/settlement-data";
 import { getExplorerTxUrl } from "@/utils/explorer";
-import { usePortfolio } from "@/components/portfolio-provider";
 
 const SEND_ASSETS = [
     { symbol: "USDC", name: "USD Coin", image: "/usdc.png" },
@@ -37,7 +36,6 @@ const SEND_ASSETS = [
     { symbol: "XLM", name: "Stellar Lumens", image: "/logo.png" },
 ];
 
-// Rates are indicative defaults — LP node quotes provide the live effective rate at submission time.
 const RECEIVE_CURRENCIES = [
     { symbol: "NGN", name: "Nigerian Naira", image: "/naira.webp", rate: 1512.45 },
     { symbol: "GHS", name: "Ghanaian Cedi", image: "/naira.webp", rate: 15.80 },
@@ -94,32 +92,26 @@ function buildQuotes(
     return results;
 }
 
-type FormValues = {
-    amount: string;
-    accountNumber: string;
-    bankCode: string;
-};
+const MOCK_BALANCE = 5000;
+
+const formSchema = z.object({
+    amount: validateAmount({
+        min: 1,
+        balance: MOCK_BALANCE,
+        maxDecimals: 6,
+        minMessage: "Minimum amount is 1 USDC",
+        balanceMessage: `Amount exceeds your balance of ${MOCK_BALANCE.toLocaleString()} USDC`
+    }),
+    accountNumber: validateBankAccount(),
+    bankCode: z.string({ message: "Please select a bank" }).min(1, "Please select a bank"),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 export default function OfframpPage() {
-    const { isConnected, address } = useWallet();
-    const { getAvailableBalance } = usePortfolio();
+    const { isConnected } = useWallet();
     const { addNotification } = useNotifications();
     const router = useRouter();
-
-    const [sendAsset, setSendAsset] = useState(SEND_ASSETS[0]);
-    const walletBalance = getAvailableBalance(sendAsset.symbol);
-
-    const formSchema = useMemo(() => z.object({
-        amount: validateAmount({
-            min: 1,
-            balance: walletBalance,
-            maxDecimals: 6,
-            minMessage: "Minimum amount is 1",
-            balanceMessage: `Amount exceeds your balance of ${walletBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${sendAsset.symbol}`
-        }),
-        accountNumber: validateBankAccount(),
-        bankCode: z.string({ message: "Please select a bank" }).min(1, "Please select a bank"),
-    }), [walletBalance, sendAsset.symbol]);
 
     const {
         handleSubmit,
@@ -128,7 +120,6 @@ export default function OfframpPage() {
         formState: { errors, isValid, isDirty },
         trigger,
     } = useForm<FormValues>({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resolver: zodResolver(formSchema as any),
         mode: "onBlur",
         defaultValues: {
@@ -142,6 +133,7 @@ export default function OfframpPage() {
     const accountNumber = watch("accountNumber");
     const selectedBankCode = watch("bankCode");
 
+    const [sendAsset, setSendAsset] = useState(SEND_ASSETS[0]);
     const [receiveCurrency, setReceiveCurrency] = useState(RECEIVE_CURRENCIES[0]);
     const selectedBank = BANKS.find(b => b.code === selectedBankCode) || null;
     const [showBankDropdown, setShowBankDropdown] = useState(false);
@@ -244,7 +236,7 @@ export default function OfframpPage() {
             : 0;
 
     const handleWithdraw = handleSubmit((data) => {
-        if (!isValid || quotePhase !== "done" || !selectedQuote || !address) {
+        if (!isValid || quotePhase !== "done" || !selectedQuote) {
             return;
         }
 
@@ -294,7 +286,7 @@ export default function OfframpPage() {
                     className="rounded-2xl border border-border bg-white shadow-sm overflow-hidden"
                 >
                     <div className="p-4 sm:p-5">
-                        <label htmlFor="amount" className="text-xs text-muted-foreground font-medium mb-2 block">
+                        <label className="text-xs text-muted-foreground font-medium mb-2 block">
                             You&apos;ll send
                         </label>
                         <div className="flex flex-col gap-1">
@@ -307,14 +299,10 @@ export default function OfframpPage() {
                                     control={control}
                                     render={({ field: { onChange, onBlur, value } }) => (
                                         <input
-                                            id="amount"
                                             type="text"
                                             inputMode="decimal"
                                             placeholder="0.00"
                                             value={value}
-                                            aria-describedby={errors.amount ? "amount-error" : undefined}
-                                            aria-invalid={!!errors.amount}
-                                            aria-required="true"
                                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                                 const val = e.target.value;
                                                 if (/^\d*\.?\d*$/.test(val)) {
@@ -335,11 +323,8 @@ export default function OfframpPage() {
                                 />
                                 <div className="relative">
                                     <button
-                                        aria-haspopup="listbox"
-                                        aria-expanded={showSendDropdown}
-                                        aria-controls="send-asset-dropdown"
                                         onClick={() => setShowSendDropdown(!showSendDropdown)}
-                                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                        className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
                                     >
                                     <Image
                                         src={sendAsset.image}
@@ -354,32 +339,15 @@ export default function OfframpPage() {
                                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                                 </button>
                                 {showSendDropdown && (
-                                    <div
-                                        id="send-asset-dropdown"
-                                        role="listbox"
-                                        className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10"
-                                    >
+                                    <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10">
                                         {SEND_ASSETS.map((asset) => (
                                             <button
                                                 key={asset.symbol}
-                                                role="option"
-                                                aria-selected={sendAsset.symbol === asset.symbol}
-                                                tabIndex={0}
                                                 onClick={() => {
                                                     setSendAsset(asset);
                                                     setShowSendDropdown(false);
                                                 }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                        e.preventDefault();
-                                                        setSendAsset(asset);
-                                                        setShowSendDropdown(false);
-                                                    } else if (e.key === 'Escape') {
-                                                        e.preventDefault();
-                                                        setShowSendDropdown(false);
-                                                    }
-                                                }}
-                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px]"
                                             >
                                                 <Image
                                                     src={asset.image}
@@ -400,12 +368,12 @@ export default function OfframpPage() {
                         </div>
                         <div className="flex justify-between mt-2 px-1">
                             {errors.amount ? (
-                                <span id="amount-error" className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
+                                <span className="text-xs text-red-500 font-medium">{errors.amount.message}</span>
                             ) : (
                                 <span></span>
                             )}
                             <div className="text-xs text-muted-foreground">
-                                Balance: {walletBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })} {sendAsset.symbol}
+                                Balance: {MOCK_BALANCE.toLocaleString()} {sendAsset.symbol}
                             </div>
                         </div>
                     </div>
@@ -423,7 +391,7 @@ export default function OfframpPage() {
 
                     <div className="p-4 sm:p-5">
                         <label className="text-xs text-muted-foreground font-medium mb-2 block">
-                            You&apos;ll receive <span className="font-normal opacity-60">(indicative — exact rate set at settlement)</span>
+                            You&apos;ll receive
                         </label>
                         <div className="flex items-center gap-3">
                             <div className="flex-1 text-2xl sm:text-3xl font-heading font-light text-foreground min-w-0 truncate min-h-[44px] flex items-center">
@@ -446,11 +414,8 @@ export default function OfframpPage() {
                             </div>
                             <div className="relative">
                                 <button
-                                    aria-haspopup="listbox"
-                                    aria-expanded={showReceiveDropdown}
-                                    aria-controls="receive-currency-dropdown"
                                     onClick={() => setShowReceiveDropdown(!showReceiveDropdown)}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                    className="flex items-center gap-2 px-3 py-2 rounded-full bg-secondary hover:bg-secondary/80 transition-colors min-h-[44px]"
                                 >
                                     <Image
                                         src={receiveCurrency.image}
@@ -465,32 +430,15 @@ export default function OfframpPage() {
                                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                                 </button>
                                 {showReceiveDropdown && (
-                                    <div
-                                        id="receive-currency-dropdown"
-                                        role="listbox"
-                                        className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10"
-                                    >
+                                    <div className="absolute right-0 top-full mt-1 w-48 rounded-xl border border-border bg-white shadow-lg py-1 z-10">
                                         {RECEIVE_CURRENCIES.map((currency) => (
                                             <button
                                                 key={currency.symbol}
-                                                role="option"
-                                                aria-selected={receiveCurrency.symbol === currency.symbol}
-                                                tabIndex={0}
                                                 onClick={() => {
                                                     setReceiveCurrency(currency);
                                                     setShowReceiveDropdown(false);
                                                 }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                        e.preventDefault();
-                                                        setReceiveCurrency(currency);
-                                                        setShowReceiveDropdown(false);
-                                                    } else if (e.key === 'Escape') {
-                                                        e.preventDefault();
-                                                        setShowReceiveDropdown(false);
-                                                    }
-                                                }}
-                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                className="w-full flex items-center gap-2.5 px-3 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[44px]"
                                             >
                                                 <Image
                                                     src={currency.image}
@@ -514,7 +462,7 @@ export default function OfframpPage() {
                     {/* Bank Details Section */}
                     <div className="border-t border-border p-4 sm:p-5 space-y-4">
                         <div className="relative">
-                            <label htmlFor="bankCode" className="text-xs text-muted-foreground font-medium mb-2 block">
+                            <label className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Select bank
                             </label>
                             <Controller
@@ -525,16 +473,9 @@ export default function OfframpPage() {
                                     return (
                                         <>
                                             <button
-                                                id="bankCode"
-                                                type="button"
-                                                aria-haspopup="listbox"
-                                                aria-expanded={showBankDropdown}
-                                                aria-controls="bank-dropdown"
-                                                aria-invalid={!!errors.bankCode}
-                                                aria-describedby={errors.bankCode ? "bank-error" : undefined}
                                                 onClick={() => setShowBankDropdown(!showBankDropdown)}
                                                 className={cn(
-                                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                                                    "w-full flex items-center justify-between px-4 py-3 rounded-xl border border-border hover:border-foreground/20 transition-colors bg-white min-h-[52px]",
                                                     errors.bankCode && "border-red-500 focus:border-red-500"
                                                 )}
                                             >
@@ -550,35 +491,16 @@ export default function OfframpPage() {
                                                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
                                             </button>
                                             {showBankDropdown && (
-                                                <div
-                                                    id="bank-dropdown"
-                                                    role="listbox"
-                                                    className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-20 max-h-56 overflow-y-auto"
-                                                >
+                                                <div className="absolute left-0 right-0 top-full mt-1 rounded-xl border border-border bg-white shadow-lg py-1 z-20 max-h-56 overflow-y-auto">
                                                     {BANKS.map((bank) => (
                                                         <button
                                                             key={bank.code}
-                                                            type="button"
-                                                            role="option"
-                                                            aria-selected={value === bank.code}
-                                                            tabIndex={0}
                                                             onClick={() => {
                                                                 onChange(bank.code);
                                                                 setShowBankDropdown(false);
                                                                 trigger("bankCode");
                                                             }}
-                                                            onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                                    e.preventDefault();
-                                                                    onChange(bank.code);
-                                                                    setShowBankDropdown(false);
-                                                                    trigger("bankCode");
-                                                                } else if (e.key === 'Escape') {
-                                                                    e.preventDefault();
-                                                                    setShowBankDropdown(false);
-                                                                }
-                                                            }}
-                                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                            className="w-full text-left px-4 py-3 text-sm hover:bg-secondary/50 transition-colors min-h-[48px]"
                                                         >
                                                             {bank.name}
                                                         </button>
@@ -586,7 +508,7 @@ export default function OfframpPage() {
                                                 </div>
                                             )}
                                             {errors.bankCode && (
-                                                <span id="bank-error" className="text-xs text-red-500 font-medium mt-1 block">
+                                                <span className="text-xs text-red-500 font-medium mt-1 block">
                                                     {errors.bankCode.message}
                                                 </span>
                                             )}
@@ -597,7 +519,7 @@ export default function OfframpPage() {
                         </div>
 
                         <div>
-                            <label htmlFor="accountNumber" className="text-xs text-muted-foreground font-medium mb-2 block">
+                            <label className="text-xs text-muted-foreground font-medium mb-2 block">
                                 Account number
                             </label>
                             <Controller
@@ -606,15 +528,11 @@ export default function OfframpPage() {
                                 render={({ field: { onChange, onBlur, value } }) => (
                                     <>
                                         <input
-                                            id="accountNumber"
                                             type="text"
                                             inputMode="numeric"
                                             maxLength={10}
                                             placeholder="Enter 10-digit account number"
                                             value={value}
-                                            aria-invalid={!!errors.accountNumber}
-                                            aria-describedby={errors.accountNumber ? "account-error" : undefined}
-                                            aria-required="true"
                                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                                                 const val = e.target.value.replace(/\D/g, "");
                                                 onChange(val);
@@ -630,7 +548,7 @@ export default function OfframpPage() {
                                             )}
                                         />
                                         {errors.accountNumber && (
-                                            <span id="account-error" className="text-xs text-red-500 font-medium mt-1 block">
+                                            <span className="text-xs text-red-500 font-medium mt-1 block">
                                                 {errors.accountNumber.message}
                                             </span>
                                         )}

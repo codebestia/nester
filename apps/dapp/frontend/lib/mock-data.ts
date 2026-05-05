@@ -67,7 +67,7 @@ const generateMockTransactions = (count: number): Transaction[] => {
             vaultName: vault,
             timestamp: date.toISOString(),
             status,
-            txHash: "mock-tx-not-on-chain",
+            txHash: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
         });
     }
     return txs;

@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import Link from 'next/link';
 import { useSettings } from "@/context/settings-context";
-import { getExplorerTxUrl } from "@/utils/explorer";
 
 interface RecentActivityProps {
     transactions: Transaction[];
@@ -49,15 +48,6 @@ export function RecentActivity({ transactions }: RecentActivityProps) {
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse min-w-[600px]">
-                        <caption className="sr-only">Recent Transaction Activity</caption>
-                        <thead className="sr-only">
-                            <tr>
-                                <th scope="col">Type</th>
-                                <th scope="col" aria-sort="descending">Date</th>
-                                <th scope="col">Amount</th>
-                                <th scope="col">Transaction Hash</th>
-                            </tr>
-                        </thead>
                         <tbody className="divide-y divide-border">
                             {latestItems.map((tx) => {
                                 const Icon = TYPE_ICONS[tx.type];
@@ -92,9 +82,9 @@ export function RecentActivity({ transactions }: RecentActivityProps) {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <a
-                                                href={getExplorerTxUrl(tx.txHash)}
-                                                target="_blank"
+                                            <a 
+                                                href={`https://stellar.expert/explorer/public/tx/${tx.txHash}`} 
+                                                target="_blank" 
                                                 rel="noopener noreferrer"
                                                 className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-all group/link font-mono"
                                             >

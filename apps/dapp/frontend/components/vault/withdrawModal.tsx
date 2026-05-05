@@ -27,8 +27,7 @@ import {
   truncateTxHash,
   type TransactionReceipt,
 } from "@/lib/stellar/transaction";
-
-import { useVaults } from "@/hooks/useVaults";
+import { VAULTS } from "@/lib/mock-vaults";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -142,8 +141,6 @@ interface WithdrawModalProps {
 export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
   const { address } = useWallet();
   const { getWithdrawalQuote, recordWithdrawal, refreshBalances } = usePortfolio();
-  const { data: vaults = [] } = useVaults();
-  const vault = position ? vaults.find((v) => v.id === position.vaultId) : null;
 
   const [amountInput, setAmountInput] = useState("");
   const [state, setState] = useState<ActionState>("input");
@@ -189,10 +186,11 @@ export function WithdrawModal({ open, onClose, position }: WithdrawModalProps) {
 
     try {
       setState("building");
+      const vaultDef = VAULTS.find((v) => v.id === position.vaultId);
       const txReceipt = await executeVaultWithdraw({
         walletAddress: address,
         vaultId: position.vaultId,
-        contractId: vault?.contractAddress || "",
+        contractId: vaultDef?.contractAddress || "",
         asset: position.asset?.toUpperCase() === "XLM" ? "XLM" : "USDC",
         shares: quote.sharesBurned,
       });

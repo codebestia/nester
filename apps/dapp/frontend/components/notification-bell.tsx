@@ -45,10 +45,8 @@ export function NotificationBell() {
         <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
                 onClick={() => setOpen((prev) => !prev)}
-                className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-white transition-all hover:border-black/20 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-white transition-all hover:border-black/20 hover:shadow-sm"
                 aria-label="Notifications"
-                aria-expanded={open}
-                aria-haspopup="dialog"
             >
                 <Bell className="h-4 w-4 text-foreground/70" />
                 {unreadCount > 0 && (

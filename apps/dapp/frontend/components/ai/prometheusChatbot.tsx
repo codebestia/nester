@@ -4,25 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import { Send, Sparkles, X } from 'lucide-react'
 import { intelligence, type ChatMessage } from '@/lib/api/intelligence'
 import { useWallet } from '@/components/wallet-provider'
-import { usePortfolio } from '@/components/portfolio-provider'
 import { motion, AnimatePresence } from 'framer-motion'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
 const QUICK_PROMPTS = [
-  'Which vault should I use for $5,000 with low risk?',
-  'Should I rebalance my portfolio?',
-  'What is happening in the DeFi market this week?',
-  'My XLM is up 40%, should I take profits?',
+  'What is my best vault for yield?',
+  'Should I rebalance now?',
+  'How is the market looking?',
+  'Optimize my portfolio',
 ]
-
-interface AssistantMessage extends ChatMessage {
-  actions?: Array<{ label: string; href: string }>
-  confidence?: number
-  riskScore?: number
-}
-
-const storageKey = (address: string) => `nester_prometheus_chat_v1:${address}`
 
 function QuickPrompts({ onSelect }: { onSelect: (p: string) => void }) {
   return (
@@ -56,8 +45,18 @@ function TypingDots() {
   )
 }
 
+function renderBold(text: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/)
+  return parts.map((part, i) =>
+    part.startsWith('**') && part.endsWith('**')
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : part
+  )
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user'
+  const paragraphs = message.content.split('\n').filter((p) => p.trim() !== '')
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       {!isUser && (
@@ -72,15 +71,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
             : 'border border-border bg-white text-foreground'
         }`}
       >
-        {isUser ? (
-          <p>{message.content}</p>
-        ) : (
-          <div className="prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-ul:my-1">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
-          </div>
-        )}
+        {paragraphs.map((p, i) => (
+          <p key={i} className={i > 0 ? 'mt-2' : ''}>
+            {renderBold(p)}
+          </p>
+        ))}
       </div>
     </div>
   )
@@ -88,12 +83,12 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
 export function PrometheusChatbot() {
   const { isConnected, address } = useWallet()
-  const { positions, balances } = usePortfolio()
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState<AssistantMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -101,40 +96,14 @@ export function PrometheusChatbot() {
   }, [messages])
 
   useEffect(() => {
+    return () => eventSourceRef.current?.close()
+  }, [])
+
+  useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 150)
     }
   }, [open])
-
-  useEffect(() => {
-    if (!address || typeof window === 'undefined') return
-    const raw = sessionStorage.getItem(storageKey(address))
-    if (!raw) return
-    try {
-      const saved = JSON.parse(raw) as AssistantMessage[]
-      if (Array.isArray(saved)) setMessages(saved)
-    } catch {
-      // Ignore invalid chat payloads.
-    }
-  }, [address])
-
-  useEffect(() => {
-    if (!address || typeof window === 'undefined') return
-    sessionStorage.setItem(storageKey(address), JSON.stringify(messages))
-  }, [address, messages])
-
-  useEffect(() => {
-    const openHandler = (event: Event) => {
-      const customEvent = event as CustomEvent<{ prompt?: string }>
-      setOpen(true)
-      if (customEvent.detail?.prompt) {
-        setInput(customEvent.detail.prompt)
-      }
-      setTimeout(() => inputRef.current?.focus(), 100)
-    }
-    window.addEventListener('nester:prometheus-open', openHandler)
-    return () => window.removeEventListener('nester:prometheus-open', openHandler)
-  }, [])
 
   if (!isConnected || !address) return null
 
@@ -147,53 +116,45 @@ export function PrometheusChatbot() {
     setStreaming(true)
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
-    intelligence
-      .sendMessage(trimmed, {
-        walletAddress: address,
-        balances,
-        positions: positions.map((p) => ({
-          vaultId: p.vaultId,
-          vaultName: p.vaultName,
-          asset: p.asset,
-          currentValue: p.currentValue,
-          apy: p.apy,
-          yieldEarned: p.yieldEarned,
-        })),
+    const source = intelligence.sendMessage(address, trimmed)
+    eventSourceRef.current = source
+
+    source.onmessage = (e: MessageEvent) => {
+      if (e.data === '[DONE]') {
+        source.close()
+        setStreaming(false)
+        return
+      }
+      const chunk = e.data.replace(/\\n/g, '\n')
+      setMessages((prev) => {
+        const updated = [...prev]
+        const last = updated[updated.length - 1]
+        if (last?.role === 'assistant') {
+          updated[updated.length - 1] = { ...last, content: last.content + chunk }
+        }
+        return updated
       })
-      .then((response) => {
-        setMessages((prev) => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = {
-              ...last,
-              content: response.content,
-              actions: response.actions,
-              confidence: response.confidence,
-              riskScore: response.riskScore,
-            }
+    }
+
+    source.onerror = () => {
+      source.close()
+      setStreaming(false)
+      setMessages((prev) => {
+        const updated = [...prev]
+        const last = updated[updated.length - 1]
+        if (last?.role === 'assistant' && last.content === '') {
+          updated[updated.length - 1] = {
+            ...last,
+            content: 'Sorry, I had trouble connecting. Please try again.',
           }
-          return updated
-        })
+        }
+        return updated
       })
-      .catch(() => {
-        setMessages((prev) => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last?.role === 'assistant' && last.content === '') {
-            updated[updated.length - 1] = {
-              ...last,
-              content: 'Sorry, I had trouble connecting. Please try again.',
-            }
-          }
-          return updated
-        })
-      })
-      .finally(() => setStreaming(false))
+    }
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
       <AnimatePresence>
         {open && (
           <motion.div
@@ -201,8 +162,9 @@ export function PrometheusChatbot() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex h-[100dvh] w-full flex-col overflow-hidden rounded-none border border-border bg-white shadow-2xl shadow-black/10 sm:static sm:h-auto sm:max-h-[84dvh] sm:min-h-[28rem] sm:w-85 sm:rounded-2xl"
+            className="flex w-85 flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-2xl shadow-black/10"
           >
+            {/* Header */}
             <div className="flex items-center gap-2 border-b border-border bg-white px-4 py-3">
               <div className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary">
                 <Sparkles className="h-3 w-3 text-foreground/50" />
@@ -221,7 +183,8 @@ export function PrometheusChatbot() {
               </button>
             </div>
 
-            <div className="flex flex-1 min-h-25 flex-col gap-3 overflow-y-auto p-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* Messages */}
+            <div className="flex max-h-72 min-h-25 flex-col gap-3 overflow-y-auto p-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {messages.length === 0 ? (
                 <p className="text-center text-[11px] text-muted-foreground">
                   Ask me anything about your portfolio or DeFi markets.
@@ -233,40 +196,21 @@ export function PrometheusChatbot() {
                   return isLastAndEmpty ? (
                     <TypingDots key={i} />
                   ) : (
-                    <div key={i} className="space-y-2">
-                      <MessageBubble message={msg} />
-                      {msg.role === 'assistant' && msg.actions && msg.actions.length > 0 && (
-                        <div className="ml-7 flex flex-wrap gap-2">
-                          {msg.actions.map((action, idx) => (
-                            <a
-                              key={`${action.href}-${idx}`}
-                              href={action.href}
-                              className="rounded-full border border-border bg-white px-2.5 py-1 text-[10px] font-medium text-foreground/75 transition-colors hover:border-black/20 hover:text-foreground"
-                            >
-                              {action.label}
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                      {msg.role === 'assistant' && typeof msg.confidence === 'number' && (
-                        <p className="ml-7 text-[10px] text-muted-foreground">
-                          Confidence: {Math.round(msg.confidence * 100)}%
-                          {typeof msg.riskScore === 'number' ? ` · Risk score: ${Math.round(msg.riskScore * 100)}` : ''}
-                        </p>
-                      )}
-                    </div>
+                    <MessageBubble key={i} message={msg} />
                   )
                 })
               )}
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Quick prompts */}
             {messages.length === 0 && (
               <div className="border-t border-border px-4 py-3">
                 <QuickPrompts onSelect={sendMessage} />
               </div>
             )}
 
+            {/* Input */}
             <div className="flex items-center gap-2 border-t border-border px-3 py-2.5">
               <input
                 ref={inputRef}
@@ -274,7 +218,7 @@ export function PrometheusChatbot() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage(input)}
-                placeholder="Ask Prometheus..."
+                placeholder="Ask Prometheus…"
                 disabled={streaming}
                 className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none disabled:opacity-50"
               />
@@ -292,6 +236,7 @@ export function PrometheusChatbot() {
         )}
       </AnimatePresence>
 
+      {/* Toggle button */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex h-13 w-13 items-center justify-center rounded-full bg-foreground text-background shadow-xl shadow-black/20 transition-transform hover:scale-105 active:scale-95"

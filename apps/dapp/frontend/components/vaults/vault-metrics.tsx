@@ -1,4 +1,4 @@
-import { formatTvl } from "@/hooks/useVaults";
+import { formatTvl } from "@/lib/mock-vaults";
 
 interface VaultMetricsProps {
   currentApy: number;

@@ -37,21 +37,11 @@ export function NetworkSelector() {
     setIsOpen(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent, networkId: 'testnet' | 'mainnet') => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      handleSwitch(networkId);
-    }
-  };
-
   return (
     <div className="relative inline-block text-left">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        aria-controls="network-dropdown"
-        className="flex items-center gap-2 rounded-full border border-border bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex items-center gap-2 rounded-full border border-border bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-secondary"
       >
         <span className="relative flex h-2.5 w-2.5">
           {currentNetwork.id === 'testnet' ? (
@@ -72,40 +62,30 @@ export function NetworkSelector() {
               onClick={() => setIsOpen(false)} 
             />
             <motion.div
-              id="network-dropdown"
-              role="listbox"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
               className="absolute right-0 z-50 mt-2 w-48 origin-top-right rounded-xl border border-border bg-white p-1 shadow-xl shadow-black/15 ring-1 ring-black/5" // Enhanced shadow and border
             >
               <div className="flex flex-col space-y-1">
-                <div
-                  role="option"
-                  tabIndex={0}
-                  aria-selected={currentNetwork.id === 'testnet'}
+                <button
                   onClick={() => handleSwitch('testnet')}
-                  onKeyDown={(e) => handleKeyDown(e, 'testnet')}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
                     currentNetwork.id === 'testnet' ? 'bg-secondary font-medium' : 'hover:bg-secondary/50'
                   }`}
                 >
                   <span className="h-2 w-2 rounded-full bg-yellow-400"></span>
                   Testnet
-                </div>
-                <div
-                  role="option"
-                  tabIndex={0}
-                  aria-selected={currentNetwork.id === 'mainnet'}
+                </button>
+                <button
                   onClick={() => handleSwitch('mainnet')}
-                  onKeyDown={(e) => handleKeyDown(e, 'mainnet')}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors ${
                     currentNetwork.id === 'mainnet' ? 'bg-secondary font-medium' : 'hover:bg-secondary/50'
                   }`}
                 >
                   <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
                   Mainnet
-                </div>
+                </button>
               </div>
             </motion.div>
           </>

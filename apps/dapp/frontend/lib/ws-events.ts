@@ -4,8 +4,6 @@
 export type WSConnectionStatus = "connected" | "reconnecting" | "offline";
 
 export type WSEventType =
-    | "auth_success"
-    | "auth_error"
     | "balance_updated"
     | "deposit_confirmed"
     | "withdrawal_confirmed"

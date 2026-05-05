@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { ProtectedRoute } from "@/components/protected-route";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AppShell } from "@/components/app-shell";
 import { PositionCards } from "@/components/position-cards";
+import { useWallet } from "@/components/wallet-provider";
 import { usePortfolio } from "@/components/portfolio-provider";
 import {
     ArrowUpRight,
@@ -241,10 +242,18 @@ function BuyModal({ stock, onClose }: { stock: TokenizedStock; onClose: () => vo
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StocksPage() {
+    const { isConnected } = useWallet();
     const { positions } = usePortfolio();
+    const router = useRouter();
     const [filter, setFilter] = useState<CategoryFilter>("all");
     const [search, setSearch] = useState("");
     const [selectedStock, setSelectedStock] = useState<TokenizedStock | null>(null);
+
+    useEffect(() => {
+        if (!isConnected) router.push("/");
+    }, [isConnected, router]);
+
+    if (!isConnected) return null;
 
     const filtered = STOCKS.filter((s) => {
         if (filter !== "all" && s.category !== filter) return false;
@@ -264,8 +273,7 @@ export default function StocksPage() {
     }, 0);
 
     return (
-        <ProtectedRoute>
-            <AppShell>
+        <AppShell>
             {/* Header */}
             <motion.div
                 initial={{ opacity: 0, y: -8 }}
@@ -455,6 +463,5 @@ export default function StocksPage() {
                 <BuyModal stock={selectedStock} onClose={() => setSelectedStock(null)} />
             )}
         </AppShell>
-        </ProtectedRoute>
     );
 }

@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { Vault } from "./useVaults";
+import { VAULTS } from "@/lib/mock-vaults";
+import type { MarketType } from "@/lib/types/vault";
 
-export type SortKey = "apy" | "tvl";
-export type FilterType = string | "all";
+export type SortKey = "apy" | "tvl" | "utilization";
+export type FilterType = MarketType | "all";
 
-export function useVaultFilters(vaults: Vault[] = []) {
+export function useVaultFilters() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -30,17 +31,17 @@ export function useVaultFilters(vaults: Vault[] = []) {
   }
 
   const filteredAndSorted = useMemo(() => {
-    const filteredVaults =
+    const vaults =
       filterType === "all"
-        ? vaults
-        : vaults.filter((v) => v.strategy === filterType);
-    return [...filteredVaults].sort((a, b) => {
-      if (sortBy === "apy") return (b.apy || 0) - (a.apy || 0);
-      if (sortBy === "tvl") return (b.tvl || 0) - (a.tvl || 0);
+        ? VAULTS
+        : VAULTS.filter((v) => v.marketType === filterType);
+    return [...vaults].sort((a, b) => {
+      if (sortBy === "apy") return b.currentApy - a.currentApy;
+      if (sortBy === "tvl") return b.tvl - a.tvl;
+      if (sortBy === "utilization") return b.utilization - a.utilization;
       return 0;
     });
-  }, [filterType, sortBy, vaults]);
+  }, [filterType, sortBy]);
 
   return { sortBy, filterType, setSort, setFilter, filteredAndSorted };
 }
-

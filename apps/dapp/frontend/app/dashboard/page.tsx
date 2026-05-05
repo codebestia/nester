@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useMemo, useState } from "react";
-import { ProtectedRoute } from "@/components/protected-route";
+import { useWallet } from "@/components/wallet-provider";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
     ArrowDownToLine,
@@ -26,8 +27,6 @@ import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { useTokenPrices } from "@/hooks/useTokenPrices";
 import { useNetwork } from "@/hooks/useNetwork";
 import { AppShell } from "@/components/app-shell";
-import { PrometheusInsightsCard } from "@/components/ai/prometheusInsightsCard";
-import { MarketSentimentWidget } from "@/components/ai/marketSentiment";
 
 const CHART_PERIODS = ["1D", "1W", "1M", "6M", "1Y", "All"] as const;
 
@@ -47,11 +46,17 @@ function getVaultIcon(vaultName: string) {
 }
 
 export default function Dashboard() {
+    const { isConnected } = useWallet();
     const { positions, transactions, balances } = usePortfolio();
     const { prices: tokenPrices } = useTokenPrices();
     const { currentNetwork } = useNetwork();
+    const router = useRouter();
     const [selectedPosition, setSelectedPosition] = useState<PortfolioPosition | null>(null);
     const [chartPeriod, setChartPeriod] = useState<(typeof CHART_PERIODS)[number]>("1W");
+
+    useEffect(() => {
+        if (!isConnected) router.push("/");
+    }, [isConnected, router]);
 
     const { protocolBalanceUsd, totalYield, avgApy } = useMemo(() => {
         const vaultUsd = positions.reduce((sum, p) => sum + p.currentValue, 0);
@@ -71,9 +76,10 @@ export default function Dashboard() {
 
     const recentTransactions = transactions.slice(0, 5);
 
+    if (!isConnected) return null;
+
     return (
-        <ProtectedRoute>
-            <AppShell>
+        <AppShell>
             {/* ── Greeting + action buttons ── */}
             <motion.div
                 initial={{ opacity: 0, y: 12 }}
@@ -87,29 +93,19 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2.5">
                     <Link
                         href="/vaults"
-                        className="flex min-h-[var(--touch-target)] items-center justify-center gap-2 rounded-full border border-black/[0.1] bg-white px-6 sm:px-5 py-2.5 text-[14px] sm:text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm active:bg-black/5"
+                        className="flex items-center gap-2 rounded-full border border-black/[0.1] bg-white px-5 py-2.5 text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm"
                     >
-                        <ArrowDownToLine className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                        <ArrowDownToLine className="h-3.5 w-3.5" />
                         Deposit
                     </Link>
                     <Link
                         href="/savings"
-                        className="flex min-h-[var(--touch-target)] items-center justify-center gap-2 rounded-full border border-black/[0.1] bg-white px-6 sm:px-5 py-2.5 text-[14px] sm:text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm active:bg-black/5"
+                        className="flex items-center gap-2 rounded-full border border-black/[0.1] bg-white px-5 py-2.5 text-[13px] font-medium text-black/65 transition-all hover:border-black/20 hover:shadow-sm"
                     >
-                        <PiggyBank className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                        <PiggyBank className="h-3.5 w-3.5" />
                         Save
                     </Link>
                 </div>
-            </motion.div>
-
-            <motion.div
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.08 }}
-                className="mb-8 grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)] gap-4"
-            >
-                <PrometheusInsightsCard />
-                <MarketSentimentWidget />
             </motion.div>
 
             {/* ── Balance + Chart row ── */}
@@ -122,20 +118,17 @@ export default function Dashboard() {
                 {/* Left — balance + stats */}
                 <div className="p-8 lg:p-10 flex flex-col justify-between">
                     <div>
-                        <p className="text-[32px] sm:text-[42px] font-light leading-none text-black tracking-[-0.02em] break-all">
+                        <p className="text-[42px] font-light leading-none text-black tracking-[-0.02em]">
                             ${protocolBalanceUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
                         <p className="mt-2 text-[12px] text-black/35 tracking-wide">Protocol Balance</p>
                     </div>
                     <div className="mt-8 space-y-5">
-                        <div className="flex flex-col gap-1">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[13px] text-black/40">Position APY</span>
-                                <span className="text-[13px] font-medium text-black">
-                                    {(avgApy * 100).toFixed(2)}%
-                                </span>
-                            </div>
-                            <p className="text-[9px] text-black/30 text-left">APY is variable and based on recent performance. Past performance is not indicative of future results.</p>
+                        <div className="flex items-center justify-between">
+                            <span className="text-[13px] text-black/40">Position APY</span>
+                            <span className="text-[13px] font-medium text-black">
+                                {(avgApy * 100).toFixed(2)}%
+                            </span>
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-[13px] text-black/40">Total earnings</span>
@@ -193,7 +186,7 @@ export default function Dashboard() {
             >
                 <div className="flex items-center justify-between px-8 pt-7 pb-0">
                     <h2 className="text-[16px] font-semibold text-black">Positions</h2>
-                    <Link href="/vaults" data-tour="deposit-cta" className="flex min-h-[var(--touch-target)] items-center px-2 -mr-2 text-[14px] sm:text-[12px] text-black/35 transition-colors hover:text-black">
+                    <Link href="/vaults" data-tour="deposit-cta" className="text-[12px] text-black/35 transition-colors hover:text-black">
                         + New Position
                     </Link>
                 </div>
@@ -206,17 +199,16 @@ export default function Dashboard() {
                             </p>
                         </div>
                     ) : (
-                        <div className="overflow-x-auto pb-2">
-                            <table className="w-full text-left min-w-[600px]">
-                                <caption className="sr-only">Your active positions</caption>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
                                 <thead>
                                     <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
-                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Vault</th>
-                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Balance</th>
-                                        <th scope="col" className="pb-3.5 pr-6 font-medium">APY</th>
-                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Yield</th>
-                                        <th scope="col" className="pb-3.5 pr-6 font-medium">Status</th>
-                                        <th scope="col" className="pb-3.5 font-medium"><span className="sr-only">Actions</span></th>
+                                        <th className="pb-3.5 pr-6 font-medium">Vault</th>
+                                        <th className="pb-3.5 pr-6 font-medium">Balance</th>
+                                        <th className="pb-3.5 pr-6 font-medium">APY</th>
+                                        <th className="pb-3.5 pr-6 font-medium">Yield</th>
+                                        <th className="pb-3.5 pr-6 font-medium">Status</th>
+                                        <th className="pb-3.5 font-medium"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -224,7 +216,7 @@ export default function Dashboard() {
                                         <tr key={position.id} className="border-b border-black/[0.04] last:border-0">
                                             <td className="py-4 pr-6">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/[0.04] text-black/40" aria-hidden="true">
+                                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black/[0.04] text-black/40">
                                                         {getVaultIcon(position.vaultName)}
                                                     </div>
                                                     <div>
@@ -236,13 +228,8 @@ export default function Dashboard() {
                                             <td className="py-4 pr-6 font-mono text-[14px] text-black">
                                                 ${position.currentValue.toFixed(2)}
                                             </td>
-                                            <td className="py-4 pr-6">
-                                                <div className="text-[14px] text-black">
-                                                    {((position.apy ?? 0) * 100).toFixed(1)}%
-                                                </div>
-                                                <div className="text-[9px] text-black/30 mt-1 max-w-[120px]">
-                                                    APY is variable. Past performance is not indicative of future results.
-                                                </div>
+                                            <td className="py-4 pr-6 text-[14px] text-black">
+                                                {((position.apy ?? 0) * 100).toFixed(1)}%
                                             </td>
                                             <td className="py-4 pr-6 font-mono text-[14px] text-black/60">
                                                 +${position.yieldEarned.toFixed(4)}
@@ -255,8 +242,7 @@ export default function Dashboard() {
                                             <td className="py-4">
                                                 <button
                                                     onClick={() => setSelectedPosition(position)}
-                                                    aria-label={`Withdraw from ${position.vaultName}`}
-                                                    className="flex min-h-[var(--touch-target)] sm:min-h-0 sm:py-1.5 items-center justify-center rounded-lg border border-black/[0.08] px-4 sm:px-3.5 text-[14px] sm:text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black active:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                                    className="rounded-lg border border-black/[0.08] px-3.5 py-1.5 text-[12px] text-black/50 transition-colors hover:border-black/20 hover:text-black"
                                                 >
                                                     Withdraw
                                                 </button>
@@ -343,14 +329,14 @@ export default function Dashboard() {
                     </div>
                 </motion.div>
             )}
+
             <WithdrawModal
                 open={!!selectedPosition}
                 onClose={() => setSelectedPosition(null)}
                 position={selectedPosition}
             />
             <GuidedTour />
-            </AppShell>
-        </ProtectedRoute>
+        </AppShell>
     );
 }
 
@@ -382,15 +368,13 @@ function WalletBalanceTable({
     }
 
     return (
-        <div className="overflow-x-auto pb-2">
-            <table className="w-full text-left min-w-[400px]">
-                <caption className="sr-only">Wallet Balance Details</caption>
-                <thead>
-                    <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
-                    <th scope="col" className="pb-3.5 pr-6 font-medium">Asset</th>
-                    <th scope="col" className="pb-3.5 pr-6 font-medium text-right">Balance</th>
-                    <th scope="col" className="pb-3.5 pr-6 font-medium text-right">Price</th>
-                    <th scope="col" className="pb-3.5 font-medium text-right">USD Value</th>
+        <table className="w-full text-left">
+            <thead>
+                <tr className="border-b border-black/[0.05] text-[11px] text-black/35">
+                    <th className="pb-3.5 pr-6 font-medium">Asset</th>
+                    <th className="pb-3.5 pr-6 font-medium text-right">Balance</th>
+                    <th className="pb-3.5 pr-6 font-medium text-right">Price</th>
+                    <th className="pb-3.5 font-medium text-right">USD Value</th>
                 </tr>
             </thead>
             <tbody>
@@ -424,6 +408,5 @@ function WalletBalanceTable({
                 ))}
             </tbody>
         </table>
-        </div>
     );
 }
