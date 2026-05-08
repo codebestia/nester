@@ -26,10 +26,16 @@ export interface VaultDefinition {
     managementFeePct: number;
     asset: SupportedAsset;
     supportedAssets: SupportedAsset[];
+    /** Soroban contract ID for the primary asset vault. Empty string = not yet deployed. */
+    contractAddress: string;
+    /** Soroban contract ID for the XLM variant of this vault, if applicable. */
+    contractXlmAddress?: string;
 }
 
-// TODO: Once smart contracts are deployed and API is ready, these vault definitions
-// should be fetched from the backend API instead of being hardcoded.
+// Deployed testnet contract IDs sourced from .env.local
+const VAULT_USDC_CONTRACT = process.env.NEXT_PUBLIC_VAULT_CONTRACT_ID ?? "";
+const VAULT_XLM_CONTRACT = process.env.NEXT_PUBLIC_VAULT_XLM_CONTRACT_ID ?? "";
+
 export const vaultDefinitions: VaultDefinition[] = [
     {
         id: "flex-savings",
@@ -48,6 +54,8 @@ export const vaultDefinitions: VaultDefinition[] = [
         managementFeePct: 0,
         asset: "USDC",
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: VAULT_USDC_CONTRACT,
+        contractXlmAddress: VAULT_XLM_CONTRACT,
     },
     {
         id: "conservative",
@@ -59,13 +67,15 @@ export const vaultDefinitions: VaultDefinition[] = [
         risk: "Low",
         icon: ShieldCheck,
         color: "emerald",
-        strategies: ["Blend Lending", "Aave stable pools"],
+        strategies: ["Blend Lending", "Stellar DEX liquidity"],
         lockDays: 30,
         earlyWithdrawalPenaltyPct: 0.1,
         performanceFeePct: 10,
         managementFeePct: 0.5,
         asset: "USDC",
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: VAULT_USDC_CONTRACT,
+        contractXlmAddress: VAULT_XLM_CONTRACT,
     },
     {
         id: "balanced",
@@ -77,13 +87,15 @@ export const vaultDefinitions: VaultDefinition[] = [
         risk: "Medium",
         icon: Vault,
         color: "blue",
-        strategies: ["Lending + LP", "Kamino integration"],
+        strategies: ["Blend Lending + LP", "Stellar DEX liquidity"],
         lockDays: 45,
         earlyWithdrawalPenaltyPct: 0.1,
         performanceFeePct: 10,
         managementFeePct: 0.5,
         asset: "USDC",
         supportedAssets: ["USDC", "XLM"],
+        contractAddress: VAULT_USDC_CONTRACT,
+        contractXlmAddress: VAULT_XLM_CONTRACT,
     },
     {
         id: "growth",
@@ -102,6 +114,7 @@ export const vaultDefinitions: VaultDefinition[] = [
         managementFeePct: 0.5,
         asset: "USDC",
         supportedAssets: ["USDC"],
+        contractAddress: VAULT_USDC_CONTRACT,
     },
     {
         id: "defi500",
@@ -120,6 +133,7 @@ export const vaultDefinitions: VaultDefinition[] = [
         managementFeePct: 0.5,
         asset: "USDC",
         supportedAssets: ["USDC"],
+        contractAddress: VAULT_USDC_CONTRACT,
     },
 ];
 

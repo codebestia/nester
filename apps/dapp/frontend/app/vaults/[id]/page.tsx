@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useWallet } from "@/components/wallet-provider";
 import { AppShell } from "@/components/app-shell";
 import Link from "next/link";
 import Image from "next/image";
 import { motion } from "framer-motion";
-import { useState } from "react";
 import { ArrowLeft, TrendingUp, Info } from "lucide-react";
 import { AnimatePresence } from "framer-motion";
 import { getVaultById, formatTvl, type MarketType } from "@/lib/mock-vaults";
 import { APYChart } from "@/components/vaults/apy-chart";
 import { AllocationDonut } from "@/components/vaults/allocation-donut";
 import { UserPosition } from "@/components/vaults/user-position";
+import { DepositModal } from "@/components/vault/depositModal";
+import { useBlendApy } from "@/hooks/useBlendApy";
 import { cn } from "@/lib/utils";
 
 const MARKET_LABELS: Record<MarketType, string> = {
@@ -69,8 +70,17 @@ export default function VaultDetailPage() {
     const { isConnected } = useWallet();
     const router = useRouter();
     const { id } = useParams();
+    const [depositOpen, setDepositOpen] = useState(false);
+    const blendApy = useBlendApy();
 
     const vault = getVaultById(id?.toString() ?? "");
+
+    // Use live Blend APY when available, fall back to vault's static value
+    const liveApy = vault?.id === "usdc"
+        ? (blendApy.usdcSupplyApy ?? vault?.currentApy)
+        : vault?.id === "xlm"
+            ? (blendApy.xlmSupplyApy ?? vault?.currentApy)
+            : vault?.currentApy;
 
     useEffect(() => {
         if (!isConnected) router.push("/");
@@ -80,6 +90,7 @@ export default function VaultDetailPage() {
     if (!isConnected || !vault) return null;
 
     return (
+        <>
         <AppShell>
                 {/* Back */}
                 <motion.div
@@ -144,7 +155,7 @@ export default function VaultDetailPage() {
                     className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4"
                 >
                     {[
-                        { label: "Current APY", value: `${vault.currentApy.toFixed(1)}%`, tooltip: "The current annualized yield rate for supplying assets to this market." },
+                        { label: "Current APY", value: `${(liveApy ?? vault.currentApy).toFixed(1)}%`, tooltip: blendApy.usdcSupplyApy || blendApy.xlmSupplyApy ? "Live APY fetched from Blend Protocol on-chain." : "The current annualized yield rate for supplying assets to this market." },
                         { label: "TVL", value: formatTvl(vault.tvl), tooltip: "Total Value Locked — the total amount of assets currently deposited in this market." },
                         { label: "Utilization", value: `${vault.utilization}%`, tooltip: "The percentage of supplied assets currently borrowed. Higher utilization often means higher yields for suppliers." },
                         { label: "APY Range", value: vault.apyRange, tooltip: "The historical range of APY this market has offered. Actual rates fluctuate based on supply and demand." },
@@ -292,18 +303,28 @@ export default function VaultDetailPage() {
 
                         {/* Supply CTA */}
                         <div className="rounded-2xl border border-black/8 bg-white p-5">
-                            <button
-                                disabled
-                                className="w-full rounded-xl bg-black py-3.5 text-sm text-white transition-opacity disabled:opacity-35 disabled:cursor-not-allowed"
-                            >
-                                Supply to {vault.name}
-                            </button>
-                            <p className="mt-2.5 text-center text-[11px] text-black/30">
-                                Supply flow coming soon
-                            </p>
+                            {vault.contractAddress ? (
+                                <button
+                                    onClick={() => setDepositOpen(true)}
+                                    className="w-full rounded-xl bg-black py-3.5 text-sm text-white transition-opacity hover:opacity-85"
+                                >
+                                    Supply to {vault.name}
+                                </button>
+                            ) : (
+                                <div className="w-full rounded-xl border border-black/8 bg-black/3 py-3.5 text-center text-sm text-black/35">
+                                    Coming Soon — not yet deployed on testnet
+                                </div>
+                            )}
                         </div>
                     </motion.div>
                 </div>
         </AppShell>
+
+        <DepositModal
+            open={depositOpen}
+            onClose={() => setDepositOpen(false)}
+            vault={vault}
+        />
+        </>
     );
 }

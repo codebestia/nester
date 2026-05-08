@@ -23,14 +23,17 @@ import {
     type PortfolioPosition,
 } from "@/components/portfolio-provider";
 import {
-    buildMockTransactionXdr,
-    signWithWalletOrMock,
-    simulateSubmission,
-} from "@/lib/mock-soroban";
+    buildDepositTransaction,
+    buildWithdrawTransaction,
+    signTransaction,
+    submitTransaction,
+    UserRejectedError,
+    TransactionFailedError,
+    TransactionTimeoutError,
+} from "@/lib/stellar/transaction";
 import { cn } from "@/lib/utils";
-import { type VaultDefinition, type SupportedAsset, vaultDefinitions } from "@/lib/vault-data";
+import { type VaultDefinition, type SupportedAsset, vaultDefinitions, getVaultById } from "@/lib/vault-data";
 import { useWallet } from "@/components/wallet-provider";
-
 import { useNetwork } from "@/hooks/useNetwork";
 
 type ActionState = "input" | "confirming" | "submitting" | "success" | "error";
@@ -181,30 +184,43 @@ export function DepositModal({
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `deposit:${vault.id}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
+            const contractId = selectedAsset === "XLM"
+                ? (vault.contractXlmAddress || vault.contractAddress)
+                : vault.contractAddress;
+
+            const { xdr } = await buildDepositTransaction({
+                walletAddress: address,
+                contractId,
+                amount,
+            });
+            const signedXdr = await signTransaction(xdr);
 
             setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
+            const txReceipt = await submitTransaction(signedXdr);
 
             recordDeposit({
                 vault: { ...vault, asset: selectedAsset },
                 amount,
-                txHash: submission.txHash,
+                txHash: txReceipt.txHash,
+                isOnChain: true,
             });
 
             setReceipt({
-                txHash: submission.txHash,
-                explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                txHash: txReceipt.txHash,
+                explorerUrl: txReceipt.explorerUrl,
+                walletPopupUsed: true,
             });
             setState("success");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Deposit failed");
+            if (err instanceof UserRejectedError) {
+                setError("You cancelled the transaction. No funds were moved.");
+            } else if (err instanceof TransactionFailedError) {
+                setError(`Transaction failed on-chain: ${err.reason}`);
+            } else if (err instanceof TransactionTimeoutError) {
+                setError("Transaction timed out. Check Stellar Explorer for the current status.");
+            } else {
+                setError(err instanceof Error ? err.message : "Deposit failed");
+            }
             setState("error");
         }
     };
@@ -615,35 +631,50 @@ export function WithdrawModal({
         setShowLargeWarning(false);
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address,
-                `withdraw:${position.vaultId}:${amount.toFixed(2)}`,
-                currentNetwork.networkPassphrase
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
+            const vaultDef = getVaultById(position.vaultId);
+            const contractId = position.asset === "XLM"
+                ? (vaultDef?.contractXlmAddress || vaultDef?.contractAddress || "")
+                : (vaultDef?.contractAddress || "");
+
+            const { xdr } = await buildWithdrawTransaction({
+                walletAddress: address,
+                contractId,
+                shares: quote.sharesBurned,
+            });
+            const signedXdr = await signTransaction(xdr);
 
             setState("submitting");
-            const submission = await simulateSubmission(currentNetwork.explorerUrl);
+            const txReceipt = await submitTransaction(signedXdr);
+
             const result = recordWithdrawal({
                 positionId: position.id,
                 grossAmount: quote.grossAmount,
-                txHash: submission.txHash,
+                txHash: txReceipt.txHash,
+                isOnChain: true,
             });
 
             if (!result) {
-                throw new Error("Unable to complete the withdrawal");
+                throw new Error("Unable to record the withdrawal locally.");
             }
 
             setReceipt({
-                txHash: submission.txHash,
-                explorerUrl: submission.explorerUrl,
-                walletPopupUsed,
+                txHash: txReceipt.txHash,
+                explorerUrl: txReceipt.explorerUrl,
+                walletPopupUsed: true,
                 penaltyAmount: result.penaltyAmount,
                 netAmount: result.netAmount,
             });
             setState("success");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Withdrawal failed");
+            if (err instanceof UserRejectedError) {
+                setError("You cancelled the transaction. No funds were moved.");
+            } else if (err instanceof TransactionFailedError) {
+                setError(`Transaction failed on-chain: ${err.reason}`);
+            } else if (err instanceof TransactionTimeoutError) {
+                setError("Transaction timed out. Check Stellar Explorer for the current status.");
+            } else {
+                setError(err instanceof Error ? err.message : "Withdrawal failed");
+            }
             setState("error");
         }
     };
@@ -948,14 +979,22 @@ export function TransferModal({
         setState("confirming");
 
         try {
-            const txXdr = await buildMockTransactionXdr(
-                address ?? "",
-                `transfer:${position.vaultId}:${selectedVault.id}:${amt.toFixed(2)}`,
-                currentNetwork.networkPassphrase,
-            );
-            const { walletPopupUsed } = await signWithWalletOrMock(txXdr, currentNetwork.networkPassphrase);
+            // A transfer is a withdrawal from the source vault; the protocol
+            // handles reallocation into the destination vault off-chain.
+            const srcVaultDef = getVaultById(position.vaultId);
+            const contractId = position.asset === "XLM"
+                ? (srcVaultDef?.contractXlmAddress || srcVaultDef?.contractAddress || "")
+                : (srcVaultDef?.contractAddress || "");
+
+            const { xdr } = await buildWithdrawTransaction({
+                walletAddress: address ?? "",
+                contractId,
+                shares: amt,
+            });
+            const signedXdr = await signTransaction(xdr);
+
             setState("submitting");
-            const { txHash, explorerUrl } = await simulateSubmission(currentNetwork.explorerUrl);
+            const txReceipt = await submitTransaction(signedXdr);
 
             recordTransfer({
                 fromPositionId: position.id,
@@ -968,19 +1007,27 @@ export function TransferModal({
                     earlyWithdrawalPenaltyPct: selectedVault.earlyWithdrawalPenaltyPct,
                 },
                 amount: amt,
-                txHash,
+                txHash: txReceipt.txHash,
             });
 
             setReceipt({
                 amount: amt,
                 toVaultName: selectedVault.name,
-                explorerUrl,
-                walletPopupUsed,
+                explorerUrl: txReceipt.explorerUrl,
+                walletPopupUsed: true,
             });
             setState("success");
         } catch (err) {
             setState("error");
-            setError(err instanceof Error ? err.message : "Transfer failed. Please try again.");
+            if (err instanceof UserRejectedError) {
+                setError("You cancelled the transaction. No funds were moved.");
+            } else if (err instanceof TransactionFailedError) {
+                setError(`Transaction failed on-chain: ${err.reason}`);
+            } else if (err instanceof TransactionTimeoutError) {
+                setError("Transaction timed out. Check Stellar Explorer for status.");
+            } else {
+                setError(err instanceof Error ? err.message : "Transfer failed. Please try again.");
+            }
         }
     });
 

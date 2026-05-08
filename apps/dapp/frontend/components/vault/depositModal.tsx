@@ -226,12 +226,17 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
 
     setErrorMsg("");
 
+    if (!vault.contractAddress || !/^C[A-Z0-9]{55}$/.test(vault.contractAddress)) {
+      setErrorMsg("This vault is not yet deployed on testnet. Check back soon.");
+      return;
+    }
+
     try {
       setState("building");
       const txReceipt = await executeVaultDeposit({
         walletAddress: address,
         vaultId: vault.id,
-        contractId: vault.contractAddress || "",
+        contractId: vault.contractAddress,
         asset: selectedAsset,
         amount,
       });
