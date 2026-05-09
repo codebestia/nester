@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertCircle,
@@ -151,7 +151,7 @@ function getVaultMeta(vault: VaultDefinition) {
     lockDays: lockMatch ? Number(lockMatch[1]) : 0,
     managementFeePct: 0.5,
     performanceFeePct: 10,
-    asset: (vault.supportedAssets[0] ?? "USDC") as "USDC",
+    asset: (vault.supportedAssets[0] ?? "USDC") as "USDC" | "XLM",
   };
 }
 
@@ -186,14 +186,18 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
     vault?.strategies?.[0] ?? null
   );
 
-  // Keep selectedAsset and strategy in sync when vault changes
   const supportedAssets = (vault?.supportedAssets ?? ["USDC"]) as ("USDC" | "XLM")[];
   const strategies = vault?.strategies ?? [];
 
-  // Reset strategy when vault changes
-  if (vault && selectedStrategy && !strategies.find(s => s.id === selectedStrategy.id)) {
-    setSelectedStrategy(strategies[0] ?? null);
-  }
+  // Reset asset, strategy, and form state whenever the vault changes
+  useEffect(() => {
+    if (!vault) return;
+    setSelectedAsset((vault.supportedAssets[0] as "USDC" | "XLM") ?? "USDC");
+    setSelectedStrategy(vault.strategies?.[0] ?? null);
+    setAmountInput("");
+    setState("input");
+    setErrorMsg("");
+  }, [vault?.id]);
 
   const amount = Number(amountInput) || 0;
   const meta = vault ? getVaultMeta(vault) : null;
