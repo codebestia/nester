@@ -9,6 +9,7 @@ import anthropic
 
 from app.config import settings
 from app.services.conversation_store import store as conversation_store
+from app.services.vault_context import VaultContextFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ CHAT_MAX_TOKENS = 1024
 ANALYZE_MAX_TOKENS = 800
 
 _client: anthropic.AsyncAnthropic | None = None
+_vault_context_fetcher: VaultContextFetcher | None = None
 
 
 def get_client() -> anthropic.AsyncAnthropic:
@@ -23,6 +25,16 @@ def get_client() -> anthropic.AsyncAnthropic:
     if _client is None:
         _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     return _client
+
+
+def get_vault_context_fetcher() -> VaultContextFetcher:
+    global _vault_context_fetcher
+    if _vault_context_fetcher is None:
+        _vault_context_fetcher = VaultContextFetcher(
+            api_base_url=settings.nester_api_base_url,
+            service_api_key=settings.nester_service_api_key
+        )
+    return _vault_context_fetcher
 
 
 # ---------------------------------------------------------------------------
@@ -100,8 +112,43 @@ async def stream_chat(user_id: str, message: str) -> AsyncIterator[str]:
     Each yielded string is formatted as `data: <text>\\n\\n`.
     A final `data: [DONE]\\n\\n` is yielded when the stream ends.
     """
+    # Get conversation history
     history = conversation_store.get(user_id)
     conversation_store.append(user_id, "user", message)
+
+    # Fetch vault context, market rates, and risk data
+    vault_context_fetcher = get_vault_context_fetcher()
+    vaults = await vault_context_fetcher.fetch_user_vaults(user_id)
+    market_rates = await vault_context_fetcher.fetch_market_rates()
+    
+    # Fetch risk data for each vault
+    risk_data = {}
+    for vault in vaults:
+        vault_id = vault.get("id")
+        if vault_id:
+            risk_info = await vault_context_fetcher.fetch_vault_risk(vault_id)
+            if risk_info:
+                risk_data[vault_id] = risk_info
+    
+    context_block = vault_context_fetcher.build_context_block(vaults, market_rates)
+    risk_profile_block = vault_context_fetcher.build_risk_profile_block(vaults, risk_data)
+    
+    # Build dynamic system prompt with context
+    dynamic_system_prompt = f"""You are Prometheus, an AI financial advisor for the Nester DeFi platform.
+
+{context_block}
+
+{risk_profile_block}
+
+## Nester Platform Context
+- Vault types: Flexible (no lock), Fixed-30d (30-day lock, higher APY), 
+  Fixed-90d (90-day lock, highest APY)
+- Rebalancing threshold: triggered when allocation drift exceeds 10%
+- Fee structure: 0.5% management fee on yield
+- Protocols supported: Aave, Blend, Compound
+
+Provide personalized, data-driven advice based on the user's actual positions 
+and current market conditions. Always cite specific numbers from their portfolio."""
 
     messages = _to_anthropic_messages(history) + [
         {"role": "user", "content": message}
@@ -114,7 +161,7 @@ async def stream_chat(user_id: str, message: str) -> AsyncIterator[str]:
         async with client.messages.stream(
             model=settings.anthropic_model,
             max_tokens=CHAT_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=dynamic_system_prompt,
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:

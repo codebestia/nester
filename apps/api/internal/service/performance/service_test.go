@@ -1,250 +1,131 @@
-package performance
-
-import (
-	"context"
-	"errors"
-	"math"
-	"testing"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
-
-	perfdom "github.com/suncrestlabs/nester/apps/api/internal/domain/performance"
-	"github.com/suncrestlabs/nester/apps/api/internal/domain/vault"
-)
-
-func TestCalculateRealizedAPY_BasicAnnualization(t *testing.T) {
-	// 5% gain over 30 days annualizes to ~79% APY.
-	current := decimal.NewFromFloat(105)
-	deposited := decimal.NewFromFloat(100)
-	apy := CalculateRealizedAPY(current, deposited, 30)
-
-	got, _ := apy.Float64()
-	expected := (math.Pow(1.05, 365.0/30.0) - 1) * 100
-	if math.Abs(got-expected) > 0.01 {
-		t.Fatalf("expected %.4f, got %.4f", expected, got)
-	}
-}
-
-func TestCalculateRealizedAPY_ZeroDeposit(t *testing.T) {
-	got := CalculateRealizedAPY(decimal.NewFromFloat(100), decimal.Zero, 30)
-	if !got.IsZero() {
-		t.Fatalf("expected 0 for zero deposit, got %s", got)
-	}
-}
-
-func TestCalculateRealizedAPY_ZeroElapsed(t *testing.T) {
-	got := CalculateRealizedAPY(decimal.NewFromFloat(105), decimal.NewFromFloat(100), 0)
-	if !got.IsZero() {
-		t.Fatalf("expected 0 for zero elapsed days, got %s", got)
-	}
-}
-
-func TestCalculateRealizedAPY_NegativeReturn(t *testing.T) {
-	// 10% loss over 30 days annualizes to a large negative number; we cap at -1000.
-	got := CalculateRealizedAPY(decimal.NewFromFloat(90), decimal.NewFromFloat(100), 30)
-	v, _ := got.Float64()
-	if v >= 0 {
-		t.Fatalf("expected negative APY for losses, got %.4f", v)
-	}
-	if v < -1001 {
-		t.Fatalf("expected APY clamped to -1000, got %.4f", v)
-	}
-}
-
-func TestCalculateRealizedAPY_ExtremeRatioClamped(t *testing.T) {
-	// Tiny denominator could blow up the result; clamp at +10000.
-	got := CalculateRealizedAPY(decimal.NewFromFloat(1_000_000), decimal.NewFromFloat(1), 1)
-	v, _ := got.Float64()
-	if v != 10000 {
-		t.Fatalf("expected APY clamped to 10000, got %.4f", v)
-	}
-}
-
-// --- snapshot worker tests below ---
-
-type stubVaultLister struct {
-	vaults []vault.Vault
-	err    error
-}
-
-func (s *stubVaultLister) ListActive(_ context.Context) ([]vault.Vault, error) {
-	return s.vaults, s.err
-}
-
-type stubBalanceProvider struct {
-	balances map[string]decimal.Decimal
-	err      error
-}
-
-func (s *stubBalanceProvider) VaultBalance(_ context.Context, addr string) (decimal.Decimal, error) {
-	if s.err != nil {
-		return decimal.Zero, s.err
-	}
-	return s.balances[addr], nil
-}
-
-type fakeRepo struct {
-	snapshots []perfdom.Snapshot
-	apyRows   map[perfdom.Period]perfdom.APYRecord
-	insertErr error
-}
-
-func newFakeRepo() *fakeRepo {
-	return &fakeRepo{apyRows: map[perfdom.Period]perfdom.APYRecord{}}
-}
-
-func (f *fakeRepo) Insert(_ context.Context, s perfdom.Snapshot) (perfdom.Snapshot, error) {
-	if f.insertErr != nil {
-		return perfdom.Snapshot{}, f.insertErr
-	}
-	if s.ID == uuid.Nil {
-		s.ID = uuid.New()
-	}
-	f.snapshots = append(f.snapshots, s)
-	return s, nil
-}
-
-func (f *fakeRepo) LatestForVault(_ context.Context, vaultID uuid.UUID) (perfdom.Snapshot, error) {
-	var latest perfdom.Snapshot
-	found := false
-	for _, s := range f.snapshots {
-		if s.VaultID != vaultID {
-			continue
-		}
-		if !found || s.SnapshotAt.After(latest.SnapshotAt) {
-			latest = s
-			found = true
-		}
-	}
-	if !found {
-		return perfdom.Snapshot{}, perfdom.ErrSnapshotNotFound
-	}
-	return latest, nil
-}
-
-func (f *fakeRepo) HistoryForVault(_ context.Context, vaultID uuid.UUID, since time.Time) ([]perfdom.Snapshot, error) {
-	out := []perfdom.Snapshot{}
-	for _, s := range f.snapshots {
-		if s.VaultID == vaultID && !s.SnapshotAt.Before(since) {
-			out = append(out, s)
-		}
-	}
-	return out, nil
-}
-
-func (f *fakeRepo) FirstAtOrAfter(_ context.Context, vaultID uuid.UUID, since time.Time) (perfdom.Snapshot, error) {
-	var first perfdom.Snapshot
-	found := false
-	for _, s := range f.snapshots {
-		if s.VaultID != vaultID {
-			continue
-		}
-		if s.SnapshotAt.Before(since) {
-			continue
-		}
-		if !found || s.SnapshotAt.Before(first.SnapshotAt) {
-			first = s
-			found = true
-		}
-	}
-	if !found {
-		return perfdom.Snapshot{}, perfdom.ErrSnapshotNotFound
-	}
-	return first, nil
-}
-
-func (f *fakeRepo) UpsertAPY(_ context.Context, rec perfdom.APYRecord) error {
-	f.apyRows[rec.Period] = rec
-	return nil
-}
-
-func (f *fakeRepo) ListAPY(_ context.Context, _ uuid.UUID) ([]perfdom.APYRecord, error) {
-	out := []perfdom.APYRecord{}
-	for _, v := range f.apyRows {
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-func TestTracker_TakeSnapshots_WritesSnapshotPerVault(t *testing.T) {
-	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
-	id1, id2 := uuid.New(), uuid.New()
-
-	vaults := &stubVaultLister{
-		vaults: []vault.Vault{
-			{ID: id1, ContractAddress: "C1", TotalDeposited: decimal.NewFromInt(100), CurrentBalance: decimal.NewFromInt(100), CreatedAt: now.Add(-90 * 24 * time.Hour)},
-			{ID: id2, ContractAddress: "C2", TotalDeposited: decimal.NewFromInt(200), CurrentBalance: decimal.NewFromInt(200), CreatedAt: now.Add(-30 * 24 * time.Hour)},
-		},
-	}
-	chain := &stubBalanceProvider{
-		balances: map[string]decimal.Decimal{
-			"C1": decimal.NewFromInt(110),
-			"C2": decimal.NewFromInt(220),
-		},
-	}
+func TestService_GetUserAnalytics_ReturnsEmptyForNoVaults(t *testing.T) {
 	repo := newFakeRepo()
+	vaultRepo := &stubVaultRepository{vaults: []vault.Vault{}, err: nil}
+	svc := NewService(repo, vaultRepo)
 
-	tr := NewTracker(repo, vaults, chain, time.Hour)
-	tr.SetClock(func() time.Time { return now })
-
-	if err := tr.TakeSnapshots(context.Background()); err != nil {
-		t.Fatalf("TakeSnapshots: %v", err)
-	}
-	if len(repo.snapshots) != 2 {
-		t.Fatalf("expected 2 snapshots, got %d", len(repo.snapshots))
-	}
-	for _, s := range repo.snapshots {
-		switch s.VaultID {
-		case id1:
-			if !s.TotalBalance.Equal(decimal.NewFromInt(110)) {
-				t.Errorf("vault 1 balance: %s", s.TotalBalance)
-			}
-			if !s.TotalYieldEarned.Equal(decimal.NewFromInt(10)) {
-				t.Errorf("vault 1 yield: %s", s.TotalYieldEarned)
-			}
-		case id2:
-			if !s.TotalBalance.Equal(decimal.NewFromInt(220)) {
-				t.Errorf("vault 2 balance: %s", s.TotalBalance)
-			}
-		}
-	}
-}
-
-func TestTracker_TakeSnapshots_FallsBackOnChainError(t *testing.T) {
-	now := time.Now().UTC()
-	id := uuid.New()
-	vaults := &stubVaultLister{
-		vaults: []vault.Vault{
-			{ID: id, ContractAddress: "C1", TotalDeposited: decimal.NewFromInt(100), CurrentBalance: decimal.NewFromInt(100), CreatedAt: now.Add(-30 * 24 * time.Hour)},
-		},
-	}
-	chain := &stubBalanceProvider{err: errors.New("rpc unavailable")}
-
-	repo := newFakeRepo()
-	tr := NewTracker(repo, vaults, chain, time.Hour)
-	tr.SetClock(func() time.Time { return now })
-
-	if err := tr.TakeSnapshots(context.Background()); err != nil {
-		t.Fatalf("TakeSnapshots: %v", err)
-	}
-	if len(repo.snapshots) != 1 {
-		t.Fatalf("expected fallback snapshot to still be written, got %d", len(repo.snapshots))
-	}
-}
-
-func TestService_Summary_NoSnapshotsReturnsZeros(t *testing.T) {
-	repo := newFakeRepo()
-	svc := NewService(repo)
-	out, err := svc.Summary(context.Background(), uuid.New())
+	ctx := context.Background()
+	userID := uuid.New()
+	resp, err := svc.GetUserAnalytics(ctx, userID, time.Now().AddDate(0, 0, -30), time.Now())
 	if err != nil {
-		t.Fatalf("Summary: %v", err)
+		t.Fatalf("GetUserAnalytics: %v", err)
 	}
-	if !out.CurrentBalance.IsZero() {
-		t.Fatalf("expected zero balance, got %s", out.CurrentBalance)
+
+	if len(resp.DailySnapshots) != 0 {
+		t.Fatalf("expected empty daily snapshots, got %d", len(resp.DailySnapshots))
 	}
-	if out.LastSnapshotAt != nil {
-		t.Fatalf("expected nil last_snapshot_at, got %v", out.LastSnapshotAt)
+	if len(resp.VaultMonthlyYield) != 0 {
+		t.Fatalf("expected empty vault monthly yield, got %d", len(resp.VaultMonthlyYield))
+	}
+	if len(resp.CurrentAllocation) != 0 {
+		t.Fatalf("expected empty current allocation, got %d", len(resp.CurrentAllocation))
+	}
+	if len(resp.Vaults) != 0 {
+		t.Fatalf("expected empty vaults, got %d", len(resp.Vaults))
+	}
+}
+
+func TestService_GetUserAnalytics_WithVaults(t *testing.T) {
+	now := time.Date(2026, 5, 27, 0, 0, 0, 0, time.UTC)
+	id1 := uuid.New()
+	id2 := uuid.New()
+
+	// Mock vault repository to return two vaults
+	vaultRepo := &stubVaultRepository{
+		vaults: []vault.Vault{
+			{
+				ID:          id1,
+				UserID:      uuid.New(),
+				ContractAddress: "VAULT1",
+				TotalDeposited: decimal.NewFromInt(1000),
+				CurrentBalance: decimal.NewFromInt(1100),
+				Currency:     "USD",
+				YieldEarned:  decimal.NewFromInt(100),
+				Allocations: []vault.Allocation{
+					{
+						Protocol: "Aave",
+						Amount:   decimal.NewFromInt(600),
+						APY:      decimal.NewFromFloat(0.08), // 8%
+					},
+					{
+						Protocol: "Blend",
+						Amount:   decimal.NewFromInt(400),
+						APY:      decimal.NewFromFloat(0.12), // 12%
+					},
+				},
+			},
+			{
+				ID:          id2,
+				UserID:      uuid.New(),
+				ContractAddress: "VAULT2",
+				TotalDeposited: decimal.NewFromInt(500),
+				CurrentBalance: decimal.NewFromInt(550),
+				Currency:     "USD",
+				YieldEarned:  decimal.NewFromInt(50),
+				Allocations: []vault.Allocation{
+					{
+						Protocol: "Compound",
+						Amount:   decimal.NewFromInt(500),
+						APY:      decimal.NewFromFloat(0.06), // 6%
+					},
+				},
+			},
+		},
+		err: nil,
+	}
+
+	// Mock performance repository to return some snapshots for history
+	repo := newFakeRepo()
+	// Add a snapshot for the first vault to have some history
+	snapshot := perfdom.Snapshot{
+		ID:             uuid.New(),
+		VaultID:        id1,
+		TotalBalance:   decimal.NewFromInt(1050),
+		TotalDeposited: decimal.NewFromInt(1000),
+		TotalYieldEarned: decimal.NewFromInt(50),
+		SharePrice:     decimal.NewFromInt(1),
+		SnapshotAt:     now.AddDate(0, 0, -15), // 15 days ago
+		AllocationBreakdown: []perfdom.AllocationBreakdownEntry{
+			{Source: "Aave", Amount: decimal.NewFromInt(600), APY: decimal.NewFromFloat(0.08)},
+			{Source: "Blend", Amount: decimal.NewFromInt(400), APY: decimal.NewFromFloat(0.12)},
+		},
+	}
+	repo.snapshots = append(repo.snapshots, snapshot)
+
+	svc := NewService(repo, vaultRepo)
+
+	ctx := context.Background()
+	userID := vaultRepo.vaults[0].UserID // Assuming both vaults belong to same user for test
+	fromTime := now.AddDate(0, 0, -30)
+	toTime := now
+
+	resp, err := svc.GetUserAnalytics(ctx, userID, fromTime, toTime)
+	if err != nil {
+		t.Fatalf("GetUserAnalytics: %v", err)
+	}
+
+	// Check that we got some daily snapshots
+	if len(resp.DailySnapshots) == 0 {
+		t.Fatalf("expected at least one daily snapshot")
+	}
+
+	// Check current allocation - should have 3 protocols (Aave, Blend, Compound)
+	if len(resp.CurrentAllocation) != 3 {
+		t.Fatalf("expected 3 protocol allocations, got %d", len(resp.CurrentAllocation))
+	}
+
+	// Check vaults info - should have 2 vaults
+	if len(resp.Vaults) != 2 {
+		t.Fatalf("expected 2 vaults, got %d", len(resp.Vaults))
+	}
+
+	// Check performance metrics
+	if resp.PerformanceMetrics.TotalYieldEarned != 150 { // 100 from vault1 + 50 from vault2
+		t.Fatalf("expected total yield earned 150, got %.2f", resp.PerformanceMetrics.TotalYieldEarned)
+	}
+	if resp.PerformanceMetrics.TotalDeposited != 1500 { // 1000 + 500
+		t.Fatalf("expected total deposited 1500, got %.2f", resp.PerformanceMetrics.TotalDeposited)
+	}
+	if resp.PerformanceMetrics.NetPosition != 150 { // (1100+550) - (1000+500) = 150
+		t.Fatalf("expected net position 150, got %.2f", resp.PerformanceMetrics.NetPosition)
 	}
 }

@@ -159,7 +159,8 @@ func run() error {
 	go wsHub.Run(wsCtx)
 
 	performanceRepository := postgres.NewPerformanceRepository(db)
-	performanceService := performancesvc.NewService(performanceRepository)
+	vaultRepository := postgres.NewVaultRepository(db)
+	performanceService := performancesvc.NewService(performanceRepository, vaultRepository)
 	performanceHandler := handler.NewPerformanceHandler(performanceService)
 
 	tracker := performancesvc.NewTracker(
@@ -209,6 +210,14 @@ func run() error {
 	authHandler.Register(mux)
 	rateHandler.Register(mux)
 	performanceHandler.Register(mux)
+	analyticsHandler := handler.NewAnalyticsHandler(performanceService)
+	analyticsHandler.Register(mux)
+	
+	// Risk service
+	riskService := services.NewRiskService(vaultRepository)
+	riskHandler := handler.NewRiskHandler(riskService)
+	riskHandler.Register(mux)
+	
 	bankHandler.Register(mux)
 
 	mux.HandleFunc("GET /ws", wsHub.ServeWs)

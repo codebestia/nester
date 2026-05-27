@@ -25,12 +25,13 @@ type VaultLister interface {
 
 // Service is the read-side façade used by the HTTP handler.
 type Service struct {
-	repo  perfdom.SnapshotRepository
-	clock func() time.Time
+	repo      perfdom.SnapshotRepository
+	vaultRepo vault.Repository
+	clock     func() time.Time
 }
 
-func NewService(repo perfdom.SnapshotRepository) *Service {
-	return &Service{repo: repo, clock: func() time.Time { return time.Now().UTC() }}
+func NewService(repo perfdom.SnapshotRepository, vaultRepo vault.Repository) *Service {
+	return &Service{repo: repo, vaultRepo: vaultRepo, clock: func() time.Time { return time.Now().UTC() }}
 }
 
 // SetClock lets tests inject deterministic time. Production stays on UTC.
@@ -144,6 +145,171 @@ func CalculateRealizedAPY(currentBalance, totalDeposited decimal.Decimal, daysEl
 // production implementation hits Stellar via internal/stellar; tests stub it.
 type BalanceProvider interface {
 	VaultBalance(ctx context.Context, contractAddress string) (decimal.Decimal, error)
+}
+
+// GetUserAnalytics returns aggregated analytics data for a user's vaults
+func (s *Service) GetUserAnalytics(ctx context.Context, userID uuid.UUID, fromTime, toTime time.Time) (AnalyticsResponse, error) {
+	// Get user's vaults
+	userVaults, err := s.repo.GetUserVaults(ctx, userID)
+	if err != nil {
+		return AnalyticsResponse{}, fmt.Errorf("failed to get user vaults: %w", err)
+	}
+
+	if len(userVaults) == 0 {
+		// Return empty response if user has no vaults
+		return AnalyticsResponse{
+			DailySnapshots:      []DailySnapshot{},
+			VaultMonthlyYield:   []VaultMonthlyYield{},
+			CurrentAllocation:   []CurrentAllocation{},
+			PerformanceMetrics:  PerformanceMetrics{},
+			Vaults:              []VaultInfo{},
+		}, nil
+	}
+
+	// Get daily snapshots for the user (aggregated across all vaults)
+	// For now, we'll use the latest snapshot as a placeholder
+	// In a real implementation, this would query a user-level analytics table or aggregate vault snapshots
+	var dailySnapshots []DailySnapshot
+	if len(userVaults) > 0 {
+		// For simplicity, we're generating a simple time series based on the first vault's history
+		// In production, this should come from a dedicated analytics table or service
+		firstVaultID := userVaults[0].VaultID
+		snapshots, err := s.repo.HistoryForVault(ctx, firstVaultID, fromTime)
+		if err != nil && !errors.Is(err, perfdom.ErrSnapshotNotFound) {
+			return AnalyticsResponse{}, fmt.Errorf("failed to get vault history: %w", err)
+		}
+
+		for _, snap := range snapshots {
+			dailySnapshots = append(dailySnapshots, DailySnapshot{
+				Date:          snap.SnapshotAt.Format("2006-01-02"),
+				TotalBalanceUSD: snap.TotalBalance.InexactFloat64(),
+				YieldEarnedUSD:  snap.TotalYieldEarned.InexactFloat64(),
+			})
+		}
+	}
+
+	// Get vault monthly yield (aggregated yield per vault per month)
+	var vaultMonthlyYield []VaultMonthlyYield
+	// This would typically come from a separate aggregation table
+	// For now, we'll leave it empty and let the frontend handle empty state
+
+	// Get current allocation across all vaults
+	var currentAllocation []CurrentAllocation
+	protocolAllocations := make(map[string]decimal.Decimal)
+	protocolAPYSums := make(map[string]decimal.Decimal)
+	var totalBalance decimal.Decimal
+
+	for _, vault := range userVaults {
+		totalBalance = totalBalance.Add(vault.CurrentBalance)
+		for _, alloc := range vault.Allocations {
+			protocolAllocations[alloc.Protocol] = protocolAllocations[alloc.Protocol].Add(alloc.Amount)
+			// Weighted sum of APY * amount for averaging later
+			protocolAPYSums[alloc.Protocol] = protocolAPYSums[alloc.Protocol].Add(alloc.Amount.Mul(alloc.APY))
+		}
+	}
+
+	for protocol, amount := range protocolAllocations {
+		if !totalBalance.IsZero() {
+			allocationPCT := amount.Div(totalBalance).Mul(decimal.NewFromInt(100)).InexactFloat64()
+			var avgAPY float64
+			if !amount.IsZero() {
+				avgAPY = protocolAPYSums[protocol].Div(amount).InexactFloat64()
+			}
+			currentAllocation = append(currentAllocation, CurrentAllocation{
+				Protocol:      protocol,
+				AllocationPCT: allocationPCT,
+				BalanceUSD:    amount.InexactFloat64(),
+				APY:           avgAPY,
+			})
+		}
+	}
+
+	// Calculate performance metrics
+	var totalYieldEarned decimal.Decimal
+	var totalDeposited decimal.Decimal
+	var totalWithdrawn decimal.Decimal // This would come from transaction history
+
+	for _, vault := range userVaults {
+		totalYieldEarned = totalYieldEarned.Add(vault.YieldEarned)
+		totalDeposited = totalDeposited.Add(vault.TotalDeposited)
+		// totalWithdrawn would need to be calculated from withdrawal transactions
+	}
+
+	netPosition := totalBalance.Sub(totalDeposited)
+
+	// Find best vault (highest APY)
+	var bestVaultName string
+	var bestVaultAPY float64
+	for _, vault := range userVaults {
+		// Calculate vault's average APY from allocations
+		var vaultTotalAPY decimal.Decimal
+		var vaultTotalAmount decimal.Decimal
+		for _, alloc := range vault.Allocations {
+			vaultTotalAPY = vaultTotalAPY.Add(alloc.Amount.Mul(alloc.APY))
+			vaultTotalAmount = vaultTotalAmount.Add(alloc.Amount)
+		}
+		var vaultAPY float64
+		if !vaultTotalAmount.IsZero() {
+			vaultAPY = vaultTotalAPY.Div(vaultTotalAmount).InexactFloat64()
+		}
+		if vaultAPY > bestVaultAPY {
+			bestVaultAPY = vaultAPY
+			bestVaultName = vault.ContractAddress // Using contract address as name for now
+			if bestVaultName == "" {
+				bestVaultName = vault.ID.String()
+			}
+		}
+	}
+
+	// Calculate average APY across all vaults
+	var averageAPY float64
+	if !totalBalance.IsZero() {
+		var weightedAPYSum decimal.Decimal
+		for _, vault := range userVaults {
+			for _, alloc := range vault.Allocations {
+				weightedAPYSum = weightedAPYSum.Add(alloc.Amount.Mul(alloc.APY))
+			}
+		}
+		averageAPY = weightedAPYSum.Div(totalBalance).InexactFloat64()
+	}
+
+	// Calculate yield change % (placeholder - would compare to previous period)
+	var yieldChangePCT float64 = 0.0
+
+	// Build vaults info for comparison table
+	var vaultsInfo []VaultInfo
+	for _, vault := range userVaults {
+		var lockPeriodDays int
+		// Determine lock period from vault metadata or default to 0
+		// This would come from vault configuration in a real implementation
+		lockPeriodDays = 0 // placeholder
+
+		vaultsInfo = append(vaultsInfo, VaultInfo{
+			ID:            vault.ID.String(),
+			Name:          vault.ContractAddress,
+			BalanceUSD:    vault.CurrentBalance.InexactFloat64(),
+			APY:           0, // placeholder - would calculate from allocations
+			YieldEarned:   vault.YieldEarned.InexactFloat64(),
+			LockPeriodDays: lockPeriodDays,
+		})
+	}
+
+	return AnalyticsResponse{
+		DailySnapshots:      dailySnapshots,
+		VaultMonthlyYield:   vaultMonthlyYield,
+		CurrentAllocation:   currentAllocation,
+		PerformanceMetrics: PerformanceMetrics{
+			TotalYieldEarned: totalYieldEarned.InexactFloat64(),
+			YieldChangePCT:   yieldChangePCT,
+			BestVaultName:    bestVaultName,
+			BestVaultAPY:     bestVaultAPY,
+			AverageAPY:       averageAPY,
+			TotalDeposited:   totalDeposited.InexactFloat64(),
+			TotalWithdrawn:   totalWithdrawn.InexactFloat64(),
+			NetPosition:      netPosition.InexactFloat64(),
+		},
+		Vaults: vaultsInfo,
+	}, nil
 }
 
 // Tracker is the snapshot-taking background worker.
