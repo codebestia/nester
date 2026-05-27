@@ -125,7 +125,7 @@ export default function OfframpPage() {
         formState: { errors, isValid, isDirty },
         trigger,
     } = useForm<FormValues>({
-        resolver: zodResolver(formSchema as any),
+        resolver: zodResolver(formSchema),
         mode: "onBlur",
         defaultValues: {
             amount: "",

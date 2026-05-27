@@ -194,10 +194,15 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
       ? userAssetOverride
       : vaultDefaultAsset;
 
-  useEffect(() => {
-    setUserAssetOverride(null);
-    setSelectedStrategy(vault?.strategies?.[0] ?? null);
-  }, [vault?.id]);
+  // Avoid setState in effect by keeping state in sync with a key,
+  // but for simplicity we will handle the vault switch in the parent or track the previous vault id.
+  const [prevVaultId, setPrevVaultId] = useState(vault?.id);
+  
+  if (vault?.id !== prevVaultId) {
+      setPrevVaultId(vault?.id);
+      setUserAssetOverride(null);
+      setSelectedStrategy(vault?.strategies?.[0] ?? null);
+  }
 
 
   const amount = Number(amountInput) || 0;
@@ -210,7 +215,7 @@ export function DepositModal({ open, onClose, vault }: DepositModalProps) {
     if (amount > balance)
       return `Insufficient balance. You have ${formatCurrency(balance)} ${selectedAsset} available.`;
     return null;
-  }, [amount, balance]);
+  }, [amount, balance, selectedAsset]);
 
   const canSubmit =
     !!vault && !!address && amount > 0 && !validationError && state === "input";
