@@ -626,7 +626,14 @@ export default function OfframpPage() {
                     {/* CTA Button */}
                     <div className="p-4 sm:p-5 pt-0">
                         <button
-                            disabled={!isValid || quotePhase !== "done" || resolveState === "loading" || resolveState === "not_found"}
+                            disabled={
+                                !isValid ||
+                                quotePhase !== "done" ||
+                                resolveState === "loading" ||
+                                resolveState === "not_found" ||
+                                resolveState === "idle" ||
+                                (resolveState === "provider_error" && !manualName.trim())
+                            }
                             onClick={handleWithdraw}
                             className="w-full rounded-xl bg-foreground text-background py-4 text-sm font-medium transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
@@ -640,11 +647,13 @@ export default function OfframpPage() {
                                             ? "Verifying account..."
                                             : resolveState === "not_found"
                                                 ? "Account not found"
-                                                : quotePhase !== "done"
-                                                    ? "Finding best rate..."
-                                                    : showLargeWarning
-                                                        ? "Yes, confirm withdrawal"
-                                                : `Withdraw ${displayReceive.toLocaleString("en-US", { minimumFractionDigits: 2 })} ${receiveCurrency.symbol}`}
+                                                : resolveState === "idle"
+                                                    ? "Waiting for account verification..."
+                                                    : quotePhase !== "done"
+                                                        ? "Finding best rate..."
+                                                        : showLargeWarning
+                                                            ? "Yes, confirm withdrawal"
+                                                            : `Withdraw ${displayReceive.toLocaleString("en-US", { minimumFractionDigits: 2 })} ${receiveCurrency.symbol}`}
                         </button>
                     </div>
                 </motion.div>
