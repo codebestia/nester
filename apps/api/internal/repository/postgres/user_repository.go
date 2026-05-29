@@ -32,7 +32,7 @@ func (r *UserRepository) Create(ctx context.Context, model *user.User) error {
 	if err := r.db.QueryRowContext(
 		ctx,
 		query,
-		model.ID.String(),
+		model.ID,
 		model.WalletAddress,
 		model.DisplayName,
 		string(model.KYCStatus),
@@ -49,7 +49,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*user.User,
 		FROM users
 		WHERE id = $1
 	`
-	return scanUser(r.db.QueryRowContext(ctx, query, id.String()))
+	return scanUser(r.db.QueryRowContext(ctx, query, id))
 }
 
 func (r *UserRepository) GetByWalletAddress(ctx context.Context, addr string) (*user.User, error) {
@@ -119,7 +119,7 @@ func scanUser(row userScanner) (*user.User, error) {
 func (r *UserRepository) GetRoles(ctx context.Context, id uuid.UUID) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT role FROM user_roles WHERE user_id = $1 ORDER BY role`,
-		id.String(),
+		id,
 	)
 	if err != nil {
 		return nil, err
