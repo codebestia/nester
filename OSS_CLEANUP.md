@@ -72,16 +72,10 @@
 
 ### 🟠 Fix Soon After Merge
 
-- [ ] **`GetRoles` passes `id.String()` instead of the raw `uuid.UUID` to pgx.**
+ - [x] **`GetRoles` passes `id.String()` instead of the raw `uuid.UUID` to pgx.** (resolved in commit `e8072f4`)
   File: `apps/api/internal/repository/postgres/user_repository.go`
-  pgx v5 handles `uuid.UUID` natively. Passing `.String()` forces string serialisation and an
-  implicit server-side cast. The rest of the repo passes UUID values directly. Change to:
-  ```go
-  rows, err := r.db.QueryContext(ctx,
-      `SELECT role FROM user_roles WHERE user_id = $1 ORDER BY role`,
-      id,   // not id.String()
-  )
-  ```
+  pgx v5 handles `uuid.UUID` natively. Passing `.String()` forced string serialisation and an
+  implicit server-side cast. This PR now passes `uuid.UUID` values directly.
 
 - [ ] **`bootstrap-admin` does not call `db.Ping()` after `sql.Open()`.**
   File: `apps/api/cmd/bootstrap-admin/main.go`
